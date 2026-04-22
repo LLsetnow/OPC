@@ -1,5 +1,6 @@
-"""OPC CLI 入口：B站视频转写 + 语音合成"""
+"""OPC CLI 入口：B站视频转写 + 语音合成 + 图片理解 + UI转Vue"""
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -7,13 +8,21 @@ from typing import Optional
 import typer
 from rich.console import Console
 
+# Windows 终端编码修复
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    sys.stdout.reconfigure(errors="replace")
+    sys.stderr.reconfigure(errors="replace")
+
 from .config import get_api_config, load_env
 from .bili import run_bili
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
+from .vision import understand_image
+from .ui2vue import ui2vue, save_vue_files, setup_vue_project
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 语音合成",
+    help="OPC 工具集：B站视频转写 + 语音合成 + 图片理解 + UI转Vue",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -146,6 +155,159 @@ def voices(
         for v in voice_list:
             if v.get("voice_type") == "OFFICIAL":
                 console.print(f"  {v.get('voice', ''):<20} {v.get('voice_name', ''):<15} {v.get('voice_type', '')}")
+
+
+# ── img 子命令 ────────────────────────────────────────────────────
+
+@app.command()
+def img(
+    image: str = typer.Argument(help="图片路径或 URL"),
+    prompt: str = typer.Option("请详细描述这张图片的内容", "-p", "--prompt", help="提问内容"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出到文件（默认打印到终端）"),
+    model: str = typer.Option("glm-5v-turbo", "--model", help="视觉模型名称"),
+    max_tokens: int = typer.Option(1024, "--max-tokens", help="最大输出 token 数"),
+    temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+):
+    """图片理解：使用视觉模型分析图片内容"""
+    load_env(env_file)
+
+    result = understand_image(
+        image=image,
+        prompt=prompt,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+    if output:
+        output_dir = str(Path(output).parent)
+        if output_dir:
+            import os
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(result)
+        console.print(f"\n结果已保存: {output}")
+    else:
+        console.print("\n" + "=" * 50)
+        console.print(result)
+        console.print("=" * 50)
+
+
+# ── ui2vue 子命令 ──────────────────────────────────────────────────
+
+UI_FRAMEWORKS = ["default", "element-plus", "ant-design-vue", "naive-ui", "vuetify", "tailwind", "pure"]
+
+
+@app.command()
+def ui2vue_cmd(
+    image: str = typer.Argument(help="UI 界面截图路径或 URL"),
+    framework: str = typer.Option("default", "-f", "--framework", help=f"UI 框架: {'/'.join(UI_FRAMEWORKS)}"),
+    component: str = typer.Option("", "-c", "--component", help="组件名称（如 UserProfile）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出目录或 .vue 文件路径"),
+    project_name: str = typer.Option("vue-app", "-p", "--project", help="Vue 项目名称（步骤3创建工程时使用）"),
+    vision_model: str = typer.Option("glm-5v-turbo", "--vision-model", help="视觉模型名称（用于分析 UI）"),
+    llm_model: str = typer.Option("", "--llm-model", help="LLM 模型名称（用于生成代码，默认读取 LLM_MODEL 环境变量）"),
+    max_tokens: int = typer.Option(8192, "--max-tokens", help="最大输出 token 数"),
+    temperature: float = typer.Option(0.3, "--temperature", help="生成温度 0-1"),
+    max_retries: int = typer.Option(3, "--max-retries", help="步骤3 最大自动修复重试次数"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+    save_vue: bool = typer.Option(True, "--save-vue/--no-save-vue", help="是否自动提取并保存 .vue 文件"),
+    create_project: bool = typer.Option(True, "--create-project/--no-create-project", help="是否创建 Vue 工程并自动修复（步骤3）"),
+):
+    """UI截图转Vue：视觉分析 → 生成Vue代码 → 创建工程并自动修复"""
+    load_env(env_file)
+
+    if framework not in UI_FRAMEWORKS:
+        console.print(f"[red]错误: 不支持的 UI 框架 '{framework}'[/red]")
+        console.print(f"可选: {', '.join(UI_FRAMEWORKS)}")
+        raise typer.Exit(1)
+
+    ui_description, vue_result, setup_result = ui2vue(
+        image=image,
+        framework=framework,
+        component_name=component,
+        output=output or ".",
+        project_name=project_name,
+        vision_model=vision_model,
+        llm_model=llm_model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        max_retries=max_retries,
+        create_project=create_project,
+    )
+
+    # 保存文件（优先，避免终端编码中断导致文件未保存）
+    comp_name = component or "GeneratedComponent"
+    saved_files = []
+
+    if save_vue and not create_project:
+        # 仅在未创建工程时手动保存 .vue 文件（创建工程时步骤3已自动保存）
+        if output:
+            output_path = Path(output)
+            if output_path.suffix == ".vue":
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                from .ui2vue import _extract_vue_code
+                vue_code = _extract_vue_code(vue_result)
+                with open(str(output_path), "w", encoding="utf-8") as f:
+                    f.write(vue_code)
+                saved_files.append(str(output_path))
+            else:
+                saved = save_vue_files(vue_result, str(output_path), comp_name)
+                saved_files.extend([str(output_path / f) for f in saved])
+        else:
+            saved = save_vue_files(vue_result, ".", comp_name)
+            saved_files.extend(saved)
+
+    # 保存完整分析报告
+    md_path = None
+    if output:
+        output_path = Path(output)
+        if create_project:
+            # 报告放在项目目录下
+            md_path = output_path / project_name / "analysis.md"
+        elif output_path.suffix == ".vue":
+            md_path = output_path.with_suffix(".md")
+        else:
+            md_path = output_path / "analysis.md"
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(md_path), "w", encoding="utf-8") as f:
+            f.write(f"# UI 截图分析\n\n框架: {framework}\n\n## UI 结构分析\n\n{ui_description}\n\n---\n\n## 生成的 Vue 代码\n\n{vue_result}")
+            if setup_result:
+                f.write(f"\n\n---\n\n## 工程构建结果\n\n")
+                f.write(f"- 项目路径: {setup_result['project_path']}\n")
+                f.write(f"- 构建成功: {'是' if setup_result['success'] else '否'}\n")
+                f.write(f"- 修复重试次数: {setup_result['retries']}\n")
+                if not setup_result['success']:
+                    for i, err in enumerate(setup_result['errors']):
+                        f.write(f"\n### 错误 {i+1}\n\n```\n{err}\n```\n")
+
+    # 安全输出到终端（处理 Windows GBK 编码）
+    try:
+        console.print("\n[bold cyan]== 步骤1: UI 结构分析 ==[/bold cyan]")
+        console.print(ui_description[:500] + ("..." if len(ui_description) > 500 else ""))
+        console.print("\n[bold green]== 步骤2: 生成的 Vue 代码 ==[/bold green]")
+        console.print(vue_result[:800] + ("..." if len(vue_result) > 800 else ""))
+        if setup_result:
+            console.print("\n[bold yellow]== 步骤3: 工程构建结果 ==[/bold yellow]")
+            if setup_result['success']:
+                console.print(f"[green]构建成功！[/green] 项目路径: {setup_result['project_path']}")
+                console.print(f"  修复重试: {setup_result['retries']} 次")
+            else:
+                console.print(f"[red]构建失败[/red]，重试 {setup_result['retries']} 次后仍未通过")
+                console.print(f"  项目路径: {setup_result['project_path']}")
+                console.print("  请手动检查错误或增加 --max-retries")
+    except UnicodeEncodeError:
+        print("\n[终端编码限制，完整内容请查看输出文件]")
+
+    if saved_files:
+        for f in saved_files:
+            print(f"[已保存] {f}")
+    if setup_result and setup_result['saved_files']:
+        for f in setup_result['saved_files']:
+            print(f"[组件已保存] {f}")
+    if md_path:
+        print(f"[分析报告] {md_path}")
 
 
 # ── 入口 ──────────────────────────────────────────────────────────

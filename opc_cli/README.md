@@ -1,6 +1,6 @@
 # OPC CLI
 
-OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 音色克隆。
+OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 音色克隆 + 图片理解 + UI转Vue。
 
 ## 安装
 
@@ -34,6 +34,10 @@ LLM_API_KEY=your_llm_api_key_here
 LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 LLM_MODEL=glm-4-flash
 
+# 可选：图片理解视觉模型配置（优先级：VISION_ > ZHIPU_ > LLM_）
+# VISION_API_KEY=your_vision_api_key_here
+# VISION_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+
 # 可选：B站 cookies 文件（下载需要登录的视频时使用）
 # YT_DLP_COOKIES=./cookies.txt
 ```
@@ -45,6 +49,8 @@ opc                  显示帮助
 opc bili             B站视频下载 + ASR 转写 + 内容总结
 opc tts              文字转语音（支持音色克隆）
 opc voices           列出可用音色
+opc img              图片理解：使用视觉模型分析图片内容
+opc ui2vue           UI截图转Vue：分析 UI 截图生成 Vue 3 组件代码
 ```
 
 ## bili — B站视频转写
@@ -172,6 +178,103 @@ opc voices
 opc voices --clone
 ```
 
+## img — 图片理解
+
+使用智谱 GLM-5V-Turbo 等视觉模型分析图片内容，支持本地图片和网络 URL，自动压缩超大图片。
+
+### 基本用法
+
+```bash
+# 分析本地图片
+opc img photo.jpg
+
+# 分析网络图片
+opc img "https://example.com/image.jpg"
+
+# 自定义提问
+opc img photo.jpg -p "这张图片里有什么动物？"
+
+# 输出结果到文件
+opc img photo.jpg -o result.txt
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `image` | | | 图片路径或 URL |
+| `--prompt` | `-p` | `请详细描述这张图片的内容` | 提问内容 |
+| `--output` | `-o` | 终端输出 | 输出到文件 |
+| `--model` | | `glm-5v-turbo` | 视觉模型名称 |
+| `--max-tokens` | | `1024` | 最大输出 token 数 |
+| `--temperature` | | `0.7` | 生成温度 [0, 1] |
+| `--env-file` | | | 自定义 .env 文件路径 |
+
+### 图片大小限制
+
+- 单张图片最大 **10MB**，超出时自动压缩（WebP → JPEG → 缩放）
+- API 配置优先级：`VISION_API_KEY` > `ZHIPU_API_KEY` > `LLM_API_KEY`
+
+## ui2vue — UI截图转Vue
+
+分析 UI 界面截图，使用视觉模型生成 Vue 3 单文件组件代码。自动提取代码并保存为 `.vue` 文件。
+
+### 基本用法
+
+```bash
+# 分析 UI 截图，生成 Vue 组件
+opc ui2vue ui-screenshot.png
+
+# 使用 Element Plus 组件库
+opc ui2vue ui-screenshot.png -f element-plus
+
+# 指定组件名称和输出目录
+opc ui2vue ui-screenshot.png -c UserProfile -o ./components
+
+# 使用 Tailwind CSS
+opc ui2vue ui-screenshot.png -f tailwind
+
+# 分析网络图片
+opc ui2vue "https://example.com/ui-design.png"
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `image` | | | UI 截图路径或 URL |
+| `--framework` | `-f` | `default` | UI 框架（见下表） |
+| `--component` | `-c` | 自动命名 | 组件名称 |
+| `--output` | `-o` | 当前目录 | 输出目录或 .vue 文件路径 |
+| `--model` | | `glm-5v-turbo` | 视觉模型名称 |
+| `--max-tokens` | | `4096` | 最大输出 token 数 |
+| `--temperature` | | `0.3` | 生成温度 [0, 1] |
+| `--save-vue` | | `true` | 自动提取并保存 .vue 文件 |
+| `--env-file` | | | 自定义 .env 文件路径 |
+
+### 支持的 UI 框架
+
+| 框架 ID | 说明 |
+|---|---|
+| `default` | 纯 Vue 3 + 自定义 CSS（默认） |
+| `element-plus` | Element Plus 组件库 |
+| `ant-design-vue` | Ant Design Vue 组件库 |
+| `naive-ui` | Naive UI 组件库 |
+| `vuetify` | Vuetify 组件库 |
+| `tailwind` | Tailwind CSS 工具类 |
+| `pure` | 纯 HTML/CSS，无 UI 框架 |
+
+### 输出文件
+
+运行后自动保存：
+
+| 文件 | 说明 |
+|---|---|
+| `{ComponentName}.vue` | 提取的 Vue 单文件组件 |
+| `analysis.md` | 完整分析（含 UI 结构说明 + 代码） |
+
+如果模型输出包含多个组件（以 `=== 组件名.vue ===` 分隔），会分别保存为独立文件。
+
 ## 项目结构
 
 ```
@@ -180,7 +283,9 @@ opc_cli/
 ├── cli.py          # CLI 入口（typer 子命令定义）
 ├── config.py       # 共享配置（环境变量、API Key）
 ├── bili.py         # B站视频下载 + ASR 转写 + 内容总结
-└── tts.py          # GLM-TTS 语音合成 + 音色克隆
+├── tts.py          # GLM-TTS 语音合成 + 音色克隆
+├── vision.py       # 图片理解（视觉模型）
+└── ui2vue.py       # UI 截图转 Vue 组件代码
 ```
 
 ## 依赖
@@ -189,10 +294,11 @@ opc_cli/
 - **rich** — 终端美化输出
 - **requests** — HTTP 请求（TTS / 音色克隆）
 - **python-dotenv** — .env 文件加载
-- **openai** — LLM 内容总结
+- **openai** — LLM 内容总结 / 图片理解
 - **zhipuai** — 智谱 ASR 语音识别
 - **yt-dlp** — B站视频下载
 - **soundfile** + **numpy** — 音频分片处理
+- **Pillow** — 图片压缩处理
 
 ## 常见问题
 
