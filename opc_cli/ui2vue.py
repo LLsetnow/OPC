@@ -77,18 +77,19 @@ def _build_client(api_key: str, base_url: str):
 
 # ── 步骤1：视觉模型分析 UI ────────────────────────────────────────
 
-def analyze_ui(image: str, vision_model: str = "glm-5v-turbo") -> str:
+def analyze_ui(image: str, vision_model: str = "") -> str:
     """
     第一步：使用视觉模型分析 UI 截图，输出结构化描述。
 
     Args:
         image: 本地图片路径或网络 URL
-        vision_model: 视觉模型名称
+        vision_model: 视觉模型名称（为空则读取 VISION_MODEL 环境变量）
 
     Returns:
         UI 结构化描述文本
     """
-    api_key, base_url = get_vision_config()
+    api_key, base_url, default_model = get_vision_config()
+    model = vision_model or default_model
 
     if _is_url(image):
         image_url = image
@@ -112,10 +113,10 @@ def analyze_ui(image: str, vision_model: str = "glm-5v-turbo") -> str:
         }
     ]
 
-    print(f"[步骤1/3] 视觉分析 UI 截图 (模型: {vision_model})...")
+    print(f"[步骤1/3] 视觉分析 UI 截图 (模型: {model})...")
 
     response = client.chat.completions.create(
-        model=vision_model,
+        model=model,
         messages=messages,
         max_tokens=4096,
         temperature=0.3,
@@ -614,7 +615,7 @@ def ui2vue(
     component_name: str = "",
     output: str = "",
     project_name: str = "vue-app",
-    vision_model: str = "glm-5v-turbo",
+    vision_model: str = "",
     llm_model: str = "",
     max_tokens: int = 8192,
     temperature: float = 0.3,

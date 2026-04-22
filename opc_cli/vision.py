@@ -92,7 +92,7 @@ def understand_image(
     """
     from openai import OpenAI
 
-    api_key, base_url = get_vision_config()
+    api_key, base_url, _default_model = get_vision_config()
 
     # 构建 image_url
     if _is_url(image):

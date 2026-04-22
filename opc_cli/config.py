@@ -54,20 +54,21 @@ def get_llm_config() -> tuple:
 
 def get_vision_config() -> tuple:
     """
-    获取视觉模型 API 配置，返回 (api_key, base_url)。
-    优先使用 VISION_API_KEY / VISION_BASE_URL，
+    获取视觉模型 API 配置，返回 (api_key, base_url, model)。
+    优先使用 VISION_API_KEY / VISION_BASE_URL / VISION_MODEL，
     其次回退到 ZHIPU_API_KEY / ZHIPU_BASE_URL，
     最后回退到 LLM_API_KEY / LLM_BASE_URL。
     """
     api_key = os.environ.get("VISION_API_KEY", "")
     base_url = os.environ.get("VISION_BASE_URL", "")
+    model = os.environ.get("VISION_MODEL", "glm-5v-turbo")
     if api_key:
-        return api_key, base_url.rstrip("/")
+        return api_key, base_url.rstrip("/"), model
 
     api_key = os.environ.get("ZHIPU_API_KEY", "")
     base_url = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     if api_key:
-        return api_key, base_url.rstrip("/")
+        return api_key, base_url.rstrip("/"), model
 
     api_key = os.environ.get("LLM_API_KEY", "")
     base_url = os.environ.get("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
@@ -76,4 +77,4 @@ def get_vision_config() -> tuple:
         print("请在 .env 文件中添加 VISION_API_KEY 或 ZHIPU_API_KEY")
         sys.exit(1)
 
-    return api_key, base_url.rstrip("/")
+    return api_key, base_url.rstrip("/"), model

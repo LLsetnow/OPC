@@ -1,4 +1,4 @@
-"""OPC CLI 入口：B站视频转写 + 语音合成 + 图片理解 + UI转Vue"""
+"""OPC CLI 入口：B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue"""
 
 import os
 import sys
@@ -17,12 +17,31 @@ if sys.platform == "win32":
 from .config import get_api_config, load_env
 from .bili import run_bili
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
+from .local_tts import (
+    load_model as _local_load_model,
+    generate_custom_voice as _local_custom_voice,
+    generate_voice_design as _local_voice_design,
+    generate_voice_clone as _local_voice_clone,
+    list_speakers as _local_list_speakers,
+    SUPPORTED_LANGUAGES as _LOCAL_LANGUAGES,
+)
+from .tts_server import (
+    start_server as _start_tts_server,
+    stop_server as _stop_tts_server,
+    get_server_url as _get_tts_server_url,
+    call_server_generate as _call_server_generate,
+    call_server_load as _call_server_load,
+    call_server_unload as _call_server_unload,
+    _is_server_running as _is_tts_server_running,
+    _read_pid_info as _read_tts_pid_info,
+    DEFAULT_PORT as _TTS_DEFAULT_PORT,
+)
 from .vision import understand_image
 from .ui2vue import ui2vue, save_vue_files, setup_vue_project
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 语音合成 + 图片理解 + UI转Vue",
+    help="OPC 工具集：B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -157,6 +176,90 @@ def voices(
                 console.print(f"  {v.get('voice', ''):<20} {v.get('voice_name', ''):<15} {v.get('voice_type', '')}")
 
 
+# ── local-tts 子命令 ─────────────────────────────────────────────
+
+@app.command("local-tts")
+def local_tts(
+    text: str = typer.Argument(help="要转换为语音的文本"),
+    output: str = typer.Option("output.wav", "-o", "--output", help="输出文件路径"),
+    mode: str = typer.Option("custom", "-m", "--mode", help="模型变体: custom=预设音色, design=设计音色, base=语音克隆"),
+    speaker: str = typer.Option("Vivian", "-s", "--speaker", help="预设音色名称（custom 模式）"),
+    language: str = typer.Option("Chinese", "-l", "--language", help=f"语言: {'/'.join(_LOCAL_LANGUAGES)}"),
+    instruct: str = typer.Option("", "--instruct", help="自然语言指令（custom 控制语气 / design 描述音色）"),
+    ref_audio: Optional[str] = typer.Option(None, "--ref-audio", help="参考音频路径（base 模式）"),
+    ref_text: Optional[str] = typer.Option(None, "--ref-text", help="参考音频对应文本（base 模式，可选）"),
+    device: str = typer.Option("cuda:0", "--device", help="设备（默认: cuda:0）"),
+    attn: str = typer.Option("sdpa", "--attn", help="注意力实现: sdpa/flash_attention_2/eager"),
+    list_speakers_flag: bool = typer.Option(False, "--list-speakers", help="列出预设音色"),
+):
+    """本地语音合成（Qwen3-TTS：预设音色 / 设计音色 / 语音克隆）"""
+    # 列出音色
+    if list_speakers_flag:
+        console.print("\n[bold]预设音色 (custom 模式):[/bold]")
+        console.print("-" * 50)
+        for name, desc in _local_list_speakers().items():
+            console.print(f"  {name:<12} {desc}")
+        console.print(f"\n支持语言: {', '.join(_LOCAL_LANGUAGES)}")
+        return
+
+    # 参数校验
+    if mode not in ("custom", "design", "base"):
+        console.print(f"[red]错误: 不支持的模式 '{mode}'，可选: custom, design, base[/red]")
+        raise typer.Exit(1)
+
+    if language not in _LOCAL_LANGUAGES:
+        console.print(f"[red]错误: 不支持的语言 '{language}'[/red]")
+        console.print(f"可选: {', '.join(_LOCAL_LANGUAGES)}")
+        raise typer.Exit(1)
+
+    if mode == "base" and not ref_audio:
+        console.print("[red]错误: base 模式需要 --ref-audio 参数[/red]")
+        raise typer.Exit(1)
+
+    if mode == "design" and not instruct:
+        console.print("[red]错误: design 模式需要 --instruct 参数描述音色[/red]")
+        raise typer.Exit(1)
+
+    if mode == "custom" and speaker not in _local_list_speakers():
+        console.print(f"[yellow]警告: 音色 '{speaker}' 不在预设列表中，可能无法正常工作[/yellow]")
+
+    # 加载模型
+    import time
+    total_t0 = time.time()
+
+    console.print(f"[bold]=== Qwen3-TTS 本地语音合成 ===[/bold]")
+    console.print(f"模式: {mode} | 音色: {speaker} | 语言: {language}")
+    model = _local_load_model(mode, device=device, attn=attn)
+
+    # 生成
+    if mode == "custom":
+        _local_custom_voice(
+            model, text,
+            speaker=speaker,
+            language=language,
+            instruct=instruct,
+            output_path=output,
+        )
+    elif mode == "design":
+        _local_voice_design(
+            model, text,
+            instruct=instruct,
+            language=language,
+            output_path=output,
+        )
+    elif mode == "base":
+        _local_voice_clone(
+            model, text,
+            ref_audio=ref_audio,
+            ref_text=ref_text or "",
+            language=language,
+            output_path=output,
+        )
+
+    total_elapsed = time.time() - total_t0
+    console.print(f"[green]完成![/green] 输出: {output} (总耗时: {total_elapsed:.1f}s)")
+
+
 # ── img 子命令 ────────────────────────────────────────────────────
 
 @app.command()
@@ -206,7 +309,7 @@ def ui2vue_cmd(
     component: str = typer.Option("", "-c", "--component", help="组件名称（如 UserProfile）"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出目录或 .vue 文件路径"),
     project_name: str = typer.Option("vue-app", "-p", "--project", help="Vue 项目名称（步骤3创建工程时使用）"),
-    vision_model: str = typer.Option("glm-5v-turbo", "--vision-model", help="视觉模型名称（用于分析 UI）"),
+    vision_model: str = typer.Option("", "--vision-model", help="视觉模型名称（用于分析 UI，默认读取 VISION_MODEL 环境变量）"),
     llm_model: str = typer.Option("", "--llm-model", help="LLM 模型名称（用于生成代码，默认读取 LLM_MODEL 环境变量）"),
     max_tokens: int = typer.Option(8192, "--max-tokens", help="最大输出 token 数"),
     temperature: float = typer.Option(0.3, "--temperature", help="生成温度 0-1"),
