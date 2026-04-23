@@ -65,10 +65,44 @@ def get_vision_config() -> tuple:
     if api_key:
         return api_key, base_url.rstrip("/"), model
 
+
+def get_image_config() -> tuple:
+    """
+    获取文生图 API 配置，返回 (api_key, model)。
+    优先使用 IMAGE_API_KEY / IMAGE_MODEL，
+    其次回退到 DASHSCOPE_API_KEY。
+    """
+    api_key = os.environ.get("IMAGE_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", "")
+    model = os.environ.get("IMAGE_MODEL", "z-image-turbo")
+
+    if not api_key:
+        print("错误: 未设置 IMAGE_API_KEY 或 DASHSCOPE_API_KEY 环境变量")
+        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model
+
     api_key = os.environ.get("ZHIPU_API_KEY", "")
     base_url = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     if api_key:
         return api_key, base_url.rstrip("/"), model
+
+
+def get_image_config() -> tuple:
+    """
+    获取文生图 API 配置，返回 (api_key, model)。
+    优先使用 IMAGE_API_KEY / IMAGE_MODEL，
+    其次回退到 DASHSCOPE_API_KEY。
+    """
+    api_key = os.environ.get("IMAGE_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", "")
+    model = os.environ.get("IMAGE_MODEL", "z-image-turbo")
+
+    if not api_key:
+        print("错误: 未设置 IMAGE_API_KEY 或 DASHSCOPE_API_KEY 环境变量")
+        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model
 
     api_key = os.environ.get("LLM_API_KEY", "")
     base_url = os.environ.get("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
@@ -78,3 +112,37 @@ def get_vision_config() -> tuple:
         sys.exit(1)
 
     return api_key, base_url.rstrip("/"), model
+
+
+def get_image_config() -> tuple:
+    """
+    获取文生图 API 配置，返回 (api_key, model)。
+    优先使用 IMAGE_API_KEY / IMAGE_MODEL，
+    其次回退到 DASHSCOPE_API_KEY。
+    """
+    api_key = os.environ.get("IMAGE_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", "")
+    model = os.environ.get("IMAGE_MODEL", "z-image-turbo")
+
+    if not api_key:
+        print("错误: 未设置 IMAGE_API_KEY 或 DASHSCOPE_API_KEY 环境变量")
+        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model
+
+
+def get_image_config() -> tuple:
+    """
+    获取文生图 API 配置，返回 (api_key, model)。
+    优先使用 IMAGE_API_KEY / IMAGE_MODEL，
+    其次回退到 DASHSCOPE_API_KEY。
+    """
+    api_key = os.environ.get("IMAGE_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", "")
+    model = os.environ.get("IMAGE_MODEL", "z-image-turbo")
+
+    if not api_key:
+        print("错误: 未设置 IMAGE_API_KEY 或 DASHSCOPE_API_KEY 环境变量")
+        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model

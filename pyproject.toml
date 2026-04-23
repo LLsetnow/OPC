@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "opc-cli"
 version = "0.1.0"
-description = "OPC 工具集：B站视频转写 + 语音合成 CLI"
+description = "OPC 工具集：B站视频转写 + 语音合成 + AI日报 CLI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
