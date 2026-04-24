@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 # Windows 终端编码修复
 if sys.platform == "win32":
@@ -14,7 +15,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy
 from .bili import run_bili
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .local_tts import (
@@ -39,7 +40,16 @@ from .tts_server import (
 from .vision import understand_image
 from .ui2vue import ui2vue, save_vue_files, setup_vue_project
 from .ai_daily import run_ai_daily
+from .check_api import run_check_api
 from .text2img import generate_image, download_image, enhance_prompt, RECOMMENDED_SIZES
+from .gpt_image import (
+    submit_and_wait as _gpt_submit_and_wait,
+    download_image as _gpt_download_image,
+    load_image_as_base64 as _gpt_load_base64,
+    _build_proxies as _gpt_build_proxies,
+    SUPPORTED_SIZES as _GPT_SIZES,
+    SIZE_4K_ONLY as _GPT_4K_SIZES,
+)
 
 app = typer.Typer(
     name="opc",
@@ -534,6 +544,139 @@ def ui2vue_cmd(
         print(f"[分析报告] {md_path}")
 
 
+# ── gpt-img 子命令 ──────────────────────────────────────────────
+
+@app.command("gpt-img")
+def gpt_img(
+    prompt: str = typer.Argument(help="提示词（中英文，描述期望生成的图像）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/gpt_img_<时间戳>.png）"),
+    size: str = typer.Option("2:3", "-s", "--size", help=f"宽高比: {', '.join(_GPT_SIZES)}"),
+    resolution: str = typer.Option("1k", "-r", "--resolution", help="分辨率档位: 1k / 2k / 4k"),
+    enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 LLM 丰富提示词（默认开启）"),
+    ref: Optional[list[str]] = typer.Option(None, "--ref", help="参考图路径或 URL（可多次指定，最多16张）"),
+    no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
+    timeout: int = typer.Option(300, "--timeout", help="最大等待时间（秒）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+):
+    """GPT-Image-2 文生图：高质量 AI 绘图（异步，自动轮询等待结果）
+
+    默认使用 LLM (LLM_MODEL) 丰富提示词，可用 --no-enhance 关闭。
+
+    宽高比: 1:1, 2:3, 3:2, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 2:1, 1:2, 21:9, 9:21
+
+    分辨率: 1k(默认) / 2k / 4k（4K仅支持6个宽屏/竖屏比例）
+
+    图生图: 使用 --ref 指定参考图（本地路径或 URL）
+    """
+    load_env(env_file)
+    api_key, base_url, cfg_model = get_gpt_image_config()
+
+    # 构建 gpt-img 专用代理
+    proxy_url = get_gpt_img_proxy()
+    proxies = _gpt_build_proxies(proxy_url)
+    if proxies:
+        console.print(f"[dim]代理: {proxy_url}[/dim]")
+
+    console.print(f"[bold]=== GPT-Image-2 文生图 ===[/bold]")
+    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+    console.print(f"宽高比: {size} | 分辨率: {resolution} | 模型: {cfg_model}")
+
+    # 使用 LLM 丰富提示词
+    if enhance:
+        console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
+        try:
+            llm_key, llm_url, llm_model = get_llm_config()
+            enhanced_prompt = enhance_prompt(
+                prompt=prompt,
+                llm_api_key=llm_key,
+                llm_base_url=llm_url,
+                llm_model=llm_model,
+            )
+            console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
+            console.print(f"[cyan]  丰富: {enhanced_prompt[:150]}{'...' if len(enhanced_prompt) > 150 else ''}[/cyan]")
+            use_prompt = enhanced_prompt
+        except Exception as e:
+            console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
+            use_prompt = prompt
+    else:
+        use_prompt = prompt
+
+    # 处理参考图
+    image_urls = None
+    if ref:
+        image_urls = []
+        for r in ref:
+            if r.startswith("http://") or r.startswith("https://"):
+                image_urls.append(r)
+            elif r.startswith("data:"):
+                image_urls.append(r)
+            else:
+                # 本地文件转 base64
+                try:
+                    data_uri = _gpt_load_base64(r)
+                    image_urls.append(data_uri)
+                    console.print(f"[dim]  参考图: {r} → base64[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠ 参考图加载失败 {r}: {e}[/yellow]")
+        console.print(f"参考图: {len(image_urls)} 张")
+
+    # 提交任务 + 轮询
+    import time as _time
+    t0 = _time.time()
+
+    def on_status(status, task_id):
+        console.print(f"[dim]  任务 {task_id} → {status}[/dim]")
+
+    try:
+        result = _gpt_submit_and_wait(
+            prompt=use_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=cfg_model,
+            size=size,
+            resolution=resolution,
+            image_urls=image_urls,
+            timeout=timeout,
+            on_status=on_status,
+            proxies=proxies,
+        )
+    except ValueError as e:
+        console.print(f"[red]参数错误: {e}[/red]")
+        raise typer.Exit(1)
+    except RuntimeError as e:
+        console.print(f"[red]生成失败: {e}[/red]")
+        raise typer.Exit(1)
+
+    elapsed = _time.time() - t0
+    image_url = result.get("image_url")
+
+    if not image_url:
+        console.print("[red]未获取到图片 URL[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s, 实际生成: {result.get('actual_time', '?')}s)")
+
+    # 输出
+    if no_download:
+        console.print(f"\n图片 URL: {image_url}")
+        console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
+    else:
+        if not output:
+            ts = _time.strftime("%Y%m%d_%H%M%S")
+            output = f"output/gpt_img_{ts}.png"
+
+        try:
+            saved = _gpt_download_image(image_url, output, proxies=proxies)
+            file_size = Path(saved).stat().st_size
+            console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
+        except Exception as e:
+            console.print(f"[red]下载失败: {e}[/red]")
+            console.print(f"图片 URL（有效期 24 小时）: {image_url}")
+            raise typer.Exit(1)
+
+    console.print(f"[dim]URL: {image_url}[/dim]")
+
+
 # ── text2img 子命令 ──────────────────────────────────────────────
 
 @app.command("text2img")
@@ -646,11 +789,57 @@ def text2img(
     console.print(f"[dim]URL: {image_url}[/dim]")
 
 
+# ── check-api 子命令 ──────────────────────────────────────────────
+
+@app.command("check-api")
+def check_api(
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+    only: Optional[list[str]] = typer.Option(None, "--only", help="只检查指定 API，可多次使用。如 --only llm --only vision"),
+):
+    """检查 .env 中 API 的连通性和密钥有效性
+
+    可用 API 名称: llm, zhipu, vision, image, gpt-image, proxy, cookies
+
+    示例:
+      opc check-api                # 检查全部
+      opc check-api --only llm     # 只检查 LLM
+      opc check-api --only llm --only vision  # 检查 LLM 和 Vision
+    """
+    console.print("[bold]=== API 连通性检查 ===[/bold]\n")
+
+    try:
+        results = run_check_api(env_file=env_file, only=only)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("API", style="cyan", width=20)
+    table.add_column("状态", width=6)
+    table.add_column("耗时", width=8)
+    table.add_column("详情")
+
+    ok_count = 0
+    for r in results:
+        status = "[green]OK[/green]" if r.ok else "[red]FAIL[/red]"
+        latency = f"{r.latency_ms}ms" if r.latency_ms else "-"
+        table.add_row(r.name, status, latency, r.detail)
+        if r.ok:
+            ok_count += 1
+
+    console.print(table)
+    console.print(f"\n结果: [green]{ok_count}[/green]/{len(results)} 通过")
+
+    if ok_count < len(results):
+        raise typer.Exit(1)
+
+
 # ── ai-daily 子命令 ──────────────────────────────────────────────
 
 @app.command("ai-daily")
 def ai_daily(
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出文件路径（默认: output/ai_daily_YYYY-MM-DD.md）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出文件完整路径（优先级高于 --output-dir）"),
+    output_dir: Optional[str] = typer.Option(None, "-d", "--output-dir", help="输出目录，文件名默认 ai_daily_YYYY-MM-DD.md"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
     no_llm: bool = typer.Option(False, "--no-llm", help="不调用 LLM，仅输出原始素材"),
     save_raw: bool = typer.Option(False, "--save-raw", help="额外保存原始 JSON 数据"),
@@ -660,7 +849,7 @@ def ai_daily(
     信息来源：36氪、虎嗅、IT之家、InfoQ（RSS）、GitHub、Arxiv
     使用 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置大模型
     """
-    run_ai_daily(output=output, env_file=env_file, no_llm=no_llm, save_raw=save_raw)
+    run_ai_daily(output=output, output_dir=output_dir, env_file=env_file, no_llm=no_llm, save_raw=save_raw)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────
