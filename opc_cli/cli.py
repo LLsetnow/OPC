@@ -44,6 +44,7 @@ from .check_api import run_check_api
 from .text2img import generate_image, download_image, enhance_prompt, RECOMMENDED_SIZES
 from .gpt_image import (
     submit_and_wait as _gpt_submit_and_wait,
+    enhance_prompt as _gpt_enhance_prompt,
     download_image as _gpt_download_image,
     load_image_as_base64 as _gpt_load_base64,
     _build_proxies as _gpt_build_proxies,
@@ -92,7 +93,7 @@ def bili(
 
 @app.command()
 def tts(
-    text: str = typer.Argument(help="要转换为语音的文本"),
+    text: str = typer.Argument("", help="要转换为语音的文本（--list-voices 时可省略）"),
     output: str = typer.Option("output.wav", "-o", "--output", help="输出音频文件路径"),
     voice: str = typer.Option("tongtong", "--voice", help="音色名称或克隆音色 ID"),
     speed: float = typer.Option(1.0, "--speed", help="语速 [0.5, 2]"),
@@ -103,11 +104,39 @@ def tts(
     ref_audio: Optional[str] = typer.Option(None, "--ref-audio", help="克隆参考音频文件路径"),
     ref_text: Optional[str] = typer.Option(None, "--ref-text", help="参考音频对应的文本内容"),
     voice_name: Optional[str] = typer.Option(None, "--voice-name", help="克隆音色名称"),
+    list_voices: bool = typer.Option(False, "--list-voices", help="列出系统音色"),
+    list_cloned: bool = typer.Option(False, "--list-cloned", help="列出已克隆的音色"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """文字转语音（支持音色克隆）"""
+    """文字转语音（支持音色克隆）
+
+    使用 --list-voices 查看系统音色，--list-cloned 查看克隆音色。
+    """
     load_env(env_file)
     api_key, base_url = get_api_config()
+
+    # 列出音色
+    if list_voices or list_cloned:
+        voice_type = "PRIVATE" if list_cloned else None
+        voice_list = _tts_list_voices(api_key, base_url, voice_type=voice_type)
+
+        if list_cloned:
+            if not voice_list:
+                console.print("暂无克隆音色")
+                return
+            console.print("\n[bold]已克隆音色:[/bold]")
+            for v in voice_list:
+                console.print(f"  {v.get('voice', ''):<40} {v.get('voice_name', ''):<20} {v.get('create_time', ''):<20}")
+        else:
+            console.print("\n[bold]系统音色:[/bold]")
+            for v in voice_list:
+                if v.get("voice_type") == "OFFICIAL":
+                    console.print(f"  {v.get('voice', ''):<20} {v.get('voice_name', ''):<15} {v.get('voice_type', '')}")
+        return
+
+    if not text:
+        console.print("[red]错误: 请提供要转换的文本，或使用 --list-voices / --list-cloned 查看音色[/red]")
+        raise typer.Exit(1)
 
     selected_voice = voice
 
@@ -160,39 +189,11 @@ def tts(
     )
 
 
-# ── voices 子命令 ─────────────────────────────────────────────────
-
-@app.command()
-def voices(
-    clone_type: bool = typer.Option(False, "--clone", help="仅显示已克隆的音色"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-):
-    """列出可用音色"""
-    load_env(env_file)
-    api_key, base_url = get_api_config()
-
-    voice_type = "PRIVATE" if clone_type else None
-    voice_list = _tts_list_voices(api_key, base_url, voice_type=voice_type)
-
-    if clone_type:
-        if not voice_list:
-            console.print("暂无克隆音色")
-            return
-        console.print("\n[bold]已克隆音色:[/bold]")
-        for v in voice_list:
-            console.print(f"  {v.get('voice', ''):<40} {v.get('voice_name', ''):<20} {v.get('create_time', ''):<20}")
-    else:
-        console.print("\n[bold]系统音色:[/bold]")
-        for v in voice_list:
-            if v.get("voice_type") == "OFFICIAL":
-                console.print(f"  {v.get('voice', ''):<20} {v.get('voice_name', ''):<15} {v.get('voice_type', '')}")
-
-
 # ── local-tts 子命令 ─────────────────────────────────────────────
 
 @app.command("local-tts")
 def local_tts(
-    text: str = typer.Argument(help="要转换为语音的文本"),
+    text: str = typer.Argument("", help="要转换为语音的文本（serve/stop/status/unload 时可省略）"),
     output: str = typer.Option("output.wav", "-o", "--output", help="输出文件路径"),
     mode: str = typer.Option("custom", "-m", "--mode", help="模型变体: custom=预设音色, design=设计音色, base=语音克隆"),
     speaker: str = typer.Option("Vivian", "-s", "--speaker", help="预设音色名称（custom 模式）"),
@@ -204,12 +205,62 @@ def local_tts(
     attn: str = typer.Option("sdpa", "--attn", help="注意力实现: sdpa/flash_attention_2/eager"),
     list_speakers_flag: bool = typer.Option(False, "--list-speakers", help="列出预设音色"),
     no_server: bool = typer.Option(False, "--no-server", help="不使用常驻服务，直接加载模型"),
+    # 服务管理选项
+    serve: bool = typer.Option(False, "--serve", help="启动 TTS 常驻服务"),
+    stop: bool = typer.Option(False, "--stop", help="停止 TTS 常驻服务"),
+    status: bool = typer.Option(False, "--status", help="查看 TTS 服务状态"),
+    unload: bool = typer.Option(False, "--unload", help="释放常驻服务中的模型缓存（服务保持运行）"),
+    port: int = typer.Option(_TTS_DEFAULT_PORT, "-p", "--port", help="服务端口（--serve 时使用）"),
 ):
-    """本地语音合成（Qwen3-TTS：预设音色 / 设计音色 / 语音克隆）
+    """本地语音合成 + 服务管理（Qwen3-TTS）
+
+    语音合成: opc local-tts "你好" （默认使用常驻服务）
+
+    服务管理: opc local-tts --serve / --stop / --status / --unload
 
     ⚠️  必须在 WSL zsh + qwen3-tts-venv 环境下运行：
         source ~/qwen3-tts-venv/bin/activate
     """
+    # ── 服务管理操作 ──
+    if status:
+        if _is_tts_server_running():
+            info = _read_tts_pid_info()
+            console.print(f"[green]TTS 服务运行中[/green]")
+            console.print(f"  PID: {info.get('pid')}")
+            console.print(f"  端口: {info.get('port')}")
+            console.print(f"  模式: {info.get('mode')}")
+            console.print(f"  设备: {info.get('device')}")
+            console.print(f"  启动时间: {info.get('started_at')}")
+        else:
+            console.print("[yellow]TTS 服务未运行[/yellow]")
+        return
+
+    if stop:
+        _stop_tts_server()
+        return
+
+    if serve:
+        _start_tts_server(mode=mode, device=device, attn=attn, port=port)
+        return
+
+    if unload:
+        server_url = _get_tts_server_url()
+        if not server_url:
+            console.print("[yellow]TTS 服务未运行，无需释放[/yellow]")
+            raise typer.Exit(0)
+        try:
+            result = _call_server_unload(server_url, mode=mode)
+            if "error" in result:
+                console.print(f"[red]错误: {result['error']}[/red]")
+            else:
+                unloaded = result.get("modes", []) or [result.get("mode", "")]
+                console.print(f"[green]已释放模型缓存:[/green] {', '.join(unloaded)}")
+        except Exception as e:
+            console.print(f"[red]释放失败: {e}[/red]")
+            raise typer.Exit(1)
+        return
+
+    # ── 语音合成 ──
     # 列出音色
     if list_speakers_flag:
         console.print("\n[bold]预设音色 (custom 模式):[/bold]")
@@ -218,6 +269,10 @@ def local_tts(
             console.print(f"  {name:<12} {desc}")
         console.print(f"\n支持语言: {', '.join(_LOCAL_LANGUAGES)}")
         return
+
+    if not text:
+        console.print("[red]错误: 语音合成需要提供文本参数，或使用 --serve/--stop/--status/--unload[/red]")
+        raise typer.Exit(1)
 
     # 参数校验
     if mode not in ("custom", "design", "base"):
@@ -295,7 +350,7 @@ def local_tts(
 
     if not use_server:
         # 直接加载模型（慢，约1分钟）
-        console.print("[dim]  直接加载模式（提示：使用 opc tts-serve 启动常驻服务可跳过模型加载）[/dim]")
+        console.print("[dim]  直接加载模式（提示：使用 opc local-tts --serve 启动常驻服务可跳过模型加载）[/dim]")
         model = _local_load_model(mode, device=device, attn=attn)
 
         # 生成
@@ -327,79 +382,15 @@ def local_tts(
         console.print(f"[green]完成![/green] 输出: {output} (总耗时: {total_elapsed:.1f}s)")
 
 
-# ── tts-serve 子命令 ──────────────────────────────────────────────
-
-@app.command("tts-serve")
-def tts_serve(
-    mode: str = typer.Option("custom", "-m", "--mode", help="初始加载的模型变体: custom/design/base"),
-    device: str = typer.Option("cuda:0", "--device", help="设备（默认: cuda:0）"),
-    attn: str = typer.Option("sdpa", "--attn", help="注意力实现: sdpa/flash_attention_2/eager"),
-    port: int = typer.Option(_TTS_DEFAULT_PORT, "-p", "--port", help="服务端口"),
-    stop: bool = typer.Option(False, "--stop", help="停止运行中的 TTS 服务"),
-    status: bool = typer.Option(False, "--status", help="查看服务状态"),
-):
-    """启动/停止 TTS 常驻服务（模型加载一次，后续调用秒级响应）
-
-    ⚠️  必须在 WSL zsh + qwen3-tts-venv 环境下运行：
-        source ~/qwen3-tts-venv/bin/activate
-    """
-    if status:
-        if _is_tts_server_running():
-            info = _read_tts_pid_info()
-            console.print(f"[green]TTS 服务运行中[/green]")
-            console.print(f"  PID: {info.get('pid')}")
-            console.print(f"  端口: {info.get('port')}")
-            console.print(f"  模式: {info.get('mode')}")
-            console.print(f"  设备: {info.get('device')}")
-            console.print(f"  启动时间: {info.get('started_at')}")
-        else:
-            console.print("[yellow]TTS 服务未运行[/yellow]")
-        return
-
-    if stop:
-        _stop_tts_server()
-        return
-
-    _start_tts_server(mode=mode, device=device, attn=attn, port=port)
-
-
-# ── tts-unload 子命令 ────────────────────────────────────────────
-
-@app.command("tts-unload")
-def tts_unload(
-    mode: str = typer.Option("", "-m", "--mode", help="释放指定模式模型（留空则释放全部）"),
-):
-    """释放常驻服务中的模型缓存（服务保持运行）
-
-    ⚠️  必须在 WSL zsh + qwen3-tts-venv 环境下运行：
-        source ~/qwen3-tts-venv/bin/activate
-    """
-    server_url = _get_tts_server_url()
-    if not server_url:
-        console.print("[yellow]TTS 服务未运行，无需释放[/yellow]")
-        raise typer.Exit(0)
-
-    try:
-        result = _call_server_unload(server_url, mode=mode)
-        if "error" in result:
-            console.print(f"[red]错误: {result['error']}[/red]")
-        else:
-            unloaded = result.get("modes", []) or [result.get("mode", "")]
-            console.print(f"[green]已释放模型缓存:[/green] {', '.join(unloaded)}")
-    except Exception as e:
-        console.print(f"[red]释放失败: {e}[/red]")
-        raise typer.Exit(1)
-
-
 # ── img 子命令 ────────────────────────────────────────────────────
 
-@app.command()
+@app.command("read-img")
 def img(
     image: str = typer.Argument(help="图片路径或 URL"),
     prompt: str = typer.Option("请详细描述这张图片的内容", "-p", "--prompt", help="提问内容"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出到文件（默认打印到终端）"),
-    model: str = typer.Option("glm-5v-turbo", "--model", help="视觉模型名称"),
-    max_tokens: int = typer.Option(1024, "--max-tokens", help="最大输出 token 数"),
+    model: str = typer.Option("", "--model", help="视觉模型名称（默认从 .env 读取 VISION_MODEL）"),
+    max_tokens: int = typer.Option(4096, "--max-tokens", help="最大输出 token 数"),
     temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
@@ -433,24 +424,32 @@ def img(
 UI_FRAMEWORKS = ["default", "element-plus", "ant-design-vue", "naive-ui", "vuetify", "tailwind", "pure"]
 
 
-@app.command()
+@app.command("ui2vue")
 def ui2vue_cmd(
-    image: str = typer.Argument(help="UI 界面截图路径或 URL"),
+    image: str = typer.Argument("", help="UI 界面截图路径或 URL（使用 --analysis 时可省略）"),
     framework: str = typer.Option("default", "-f", "--framework", help=f"UI 框架: {'/'.join(UI_FRAMEWORKS)}"),
     component: str = typer.Option("", "-c", "--component", help="组件名称（如 UserProfile）"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出目录或 .vue 文件路径"),
     project_name: str = typer.Option("vue-app", "-p", "--project", help="Vue 项目名称（步骤3创建工程时使用）"),
     vision_model: str = typer.Option("", "--vision-model", help="视觉模型名称（用于分析 UI，默认读取 VISION_MODEL 环境变量）"),
     llm_model: str = typer.Option("", "--llm-model", help="LLM 模型名称（用于生成代码，默认读取 LLM_MODEL 环境变量）"),
-    max_tokens: int = typer.Option(8192, "--max-tokens", help="最大输出 token 数"),
+    max_tokens: int = typer.Option(16384, "--max-tokens", help="最大输出 token 数"),
     temperature: float = typer.Option(0.3, "--temperature", help="生成温度 0-1"),
     max_retries: int = typer.Option(3, "--max-retries", help="步骤3 最大自动修复重试次数"),
+    analysis: str = typer.Option("", "--analysis", help="已有的 UI 分析 md 文件路径（提供后跳过步骤1，直接使用已有分析结果）"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
     save_vue: bool = typer.Option(True, "--save-vue/--no-save-vue", help="是否自动提取并保存 .vue 文件"),
     create_project: bool = typer.Option(True, "--create-project/--no-create-project", help="是否创建 Vue 工程并自动修复（步骤3）"),
 ):
-    """UI截图转Vue：视觉分析 → 生成Vue代码 → 创建工程并自动修复"""
+    """UI截图转Vue：视觉分析 → 生成Vue代码 → 创建工程并自动修复
+
+    使用 --analysis 可跳过步骤1，直接使用已有的分析结果生成代码。
+    """
     load_env(env_file)
+
+    if not analysis and not image:
+        console.print("[red]错误: 必须提供 image 参数或 --analysis 文件路径[/red]")
+        raise typer.Exit(1)
 
     if framework not in UI_FRAMEWORKS:
         console.print(f"[red]错误: 不支持的 UI 框架 '{framework}'[/red]")
@@ -469,6 +468,7 @@ def ui2vue_cmd(
         temperature=temperature,
         max_retries=max_retries,
         create_project=create_project,
+        analysis_file=analysis,
     )
 
     # 保存文件（优先，避免终端编码中断导致文件未保存）
@@ -516,13 +516,9 @@ def ui2vue_cmd(
                     for i, err in enumerate(setup_result['errors']):
                         f.write(f"\n### 错误 {i+1}\n\n```\n{err}\n```\n")
 
-    # 安全输出到终端（处理 Windows GBK 编码）
-    try:
-        console.print("\n[bold cyan]== 步骤1: UI 结构分析 ==[/bold cyan]")
-        console.print(ui_description[:500] + ("..." if len(ui_description) > 500 else ""))
-        console.print("\n[bold green]== 步骤2: 生成的 Vue 代码 ==[/bold green]")
-        console.print(vue_result[:800] + ("..." if len(vue_result) > 800 else ""))
-        if setup_result:
+    # 步骤1和步骤2已在 ui2vue() 中实时打印，这里只输出步骤3的最终构建结果
+    if setup_result:
+        try:
             console.print("\n[bold yellow]== 步骤3: 工程构建结果 ==[/bold yellow]")
             if setup_result['success']:
                 console.print(f"[green]构建成功！[/green] 项目路径: {setup_result['project_path']}")
@@ -531,8 +527,8 @@ def ui2vue_cmd(
                 console.print(f"[red]构建失败[/red]，重试 {setup_result['retries']} 次后仍未通过")
                 console.print(f"  项目路径: {setup_result['project_path']}")
                 console.print("  请手动检查错误或增加 --max-retries")
-    except UnicodeEncodeError:
-        print("\n[终端编码限制，完整内容请查看输出文件]")
+        except UnicodeEncodeError:
+            print("\n[终端编码限制，完整内容请查看日志文件]")
 
     if saved_files:
         for f in saved_files:
@@ -555,6 +551,7 @@ def gpt_img(
     enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 LLM 丰富提示词（默认开启）"),
     ref: Optional[list[str]] = typer.Option(None, "--ref", help="参考图路径或 URL（可多次指定，最多16张）"),
     no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
+    use_proxy: bool = typer.Option(False, "--proxy/--no-proxy", help="是否使用 GPT_IMG_PROXY 代理（默认不使用）"),
     timeout: int = typer.Option(300, "--timeout", help="最大等待时间（秒）"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
@@ -571,35 +568,42 @@ def gpt_img(
     load_env(env_file)
     api_key, base_url, cfg_model = get_gpt_image_config()
 
-    # 构建 gpt-img 专用代理
-    proxy_url = get_gpt_img_proxy()
-    proxies = _gpt_build_proxies(proxy_url)
-    if proxies:
-        console.print(f"[dim]代理: {proxy_url}[/dim]")
+    # 构建 gpt-img 专用代理（默认不使用）
+    proxies = None
+    if use_proxy:
+        proxy_url = get_gpt_img_proxy()
+        proxies = _gpt_build_proxies(proxy_url)
+        if proxies:
+            console.print(f"[dim]代理: {proxy_url}[/dim]")
 
     console.print(f"[bold]=== GPT-Image-2 文生图 ===[/bold]")
     console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
     console.print(f"宽高比: {size} | 分辨率: {resolution} | 模型: {cfg_model}")
 
     # 使用 LLM 丰富提示词
+    use_prompt = prompt
+    use_prompt_json = None
     if enhance:
         console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
         try:
             llm_key, llm_url, llm_model = get_llm_config()
-            enhanced_prompt = enhance_prompt(
+            enhanced = _gpt_enhance_prompt(
                 prompt=prompt,
                 llm_api_key=llm_key,
                 llm_base_url=llm_url,
                 llm_model=llm_model,
+                aspect_ratio=size,
             )
+            use_prompt = enhanced["flat"]
+            use_prompt_json = enhanced["json_str"]
             console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
-            console.print(f"[cyan]  丰富: {enhanced_prompt[:150]}{'...' if len(enhanced_prompt) > 150 else ''}[/cyan]")
-            use_prompt = enhanced_prompt
+            if use_prompt_json:
+                # 显示 JSON 结构化提示词
+                console.print(f"[cyan]  丰富(JSON): {use_prompt_json[:300]}{'...' if len(use_prompt_json) > 300 else ''}[/cyan]")
+            else:
+                console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
         except Exception as e:
             console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
-            use_prompt = prompt
-    else:
-        use_prompt = prompt
 
     # 处理参考图
     image_urls = None
@@ -639,6 +643,7 @@ def gpt_img(
             timeout=timeout,
             on_status=on_status,
             proxies=proxies,
+            prompt_json=use_prompt_json,
         )
     except ValueError as e:
         console.print(f"[red]参数错误: {e}[/red]")
@@ -677,9 +682,9 @@ def gpt_img(
     console.print(f"[dim]URL: {image_url}[/dim]")
 
 
-# ── text2img 子命令 ──────────────────────────────────────────────
+# ── Z-image 子命令 ──────────────────────────────────────────────
 
-@app.command("text2img")
+@app.command("Z-image")
 def text2img(
     prompt: str = typer.Argument(help="提示词（中英文，描述期望生成的图像）"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/text2img_<时间戳>.png）"),
@@ -712,24 +717,25 @@ def text2img(
     console.print(f"分辨率: {size} | 模型: {use_model}")
 
     # 使用 LLM 丰富提示词
+    use_prompt = prompt
+    use_prompt_json = None
     if enhance:
         console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
         try:
             llm_key, llm_url, llm_model = get_llm_config()
-            enhanced_prompt = enhance_prompt(
+            enhanced = enhance_prompt(
                 prompt=prompt,
                 llm_api_key=llm_key,
                 llm_base_url=llm_url,
                 llm_model=llm_model,
+                aspect_ratio=size,
             )
+            use_prompt = enhanced["flat"]
+            use_prompt_json = enhanced["json_str"]
             console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
-            console.print(f"[cyan]  丰富: {enhanced_prompt[:150]}{'...' if len(enhanced_prompt) > 150 else ''}[/cyan]")
-            use_prompt = enhanced_prompt
+            console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
         except Exception as e:
             console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
-            use_prompt = prompt
-    else:
-        use_prompt = prompt
 
     if prompt_extend:
         console.print("[cyan]z-image 智能提示词改写: 已开启[/cyan]")
@@ -834,9 +840,9 @@ def check_api(
         raise typer.Exit(1)
 
 
-# ── ai-daily 子命令 ──────────────────────────────────────────────
+# ── news 子命令 ──────────────────────────────────────────────
 
-@app.command("ai-daily")
+@app.command("news")
 def ai_daily(
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出文件完整路径（优先级高于 --output-dir）"),
     output_dir: Optional[str] = typer.Option(None, "-d", "--output-dir", help="输出目录，文件名默认 ai_daily_YYYY-MM-DD.md"),
@@ -855,6 +861,8 @@ def ai_daily(
 # ── 入口 ──────────────────────────────────────────────────────────
 
 def main():
+    from .logger import install_tee
+    install_tee()
     app()
 
 

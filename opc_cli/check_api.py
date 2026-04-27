@@ -31,13 +31,6 @@ class CheckResult:
 
 # ── 各 API 检查函数 ──────────────────────────────────────────────
 
-def _mask_key(key: str) -> str:
-    """隐藏 API Key 中间部分"""
-    if not key or len(key) < 12:
-        return key or ""
-    return key[:6] + "***" + key[-4:]
-
-
 def check_llm() -> CheckResult:
     """测试 LLM API（发送最简短请求）"""
     try:
@@ -55,7 +48,7 @@ def check_llm() -> CheckResult:
         )
         latency = int((time.time() - t0) * 1000)
         content = resp.choices[0].message.content or ""
-        return CheckResult("LLM", True, f"model={model} key={_mask_key(api_key)} resp={content[:30]}", latency)
+        return CheckResult("LLM", True, f"model={model} url={base_url} resp={content[:30]}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
         return CheckResult("LLM", False, f"{type(e).__name__}: {e}", latency)
@@ -78,9 +71,9 @@ def check_zhipu() -> CheckResult:
         if resp.status_code == 200:
             data = resp.json()
             count = len(data.get("data", {}).get("voices", []))
-            return CheckResult("ZhiPu (TTS/ASR)", True, f"key={_mask_key(api_key)} voices_ok", latency)
+            return CheckResult("ZhiPu (TTS/ASR)", True, f"url={base_url} voices_ok", latency)
         elif resp.status_code == 401:
-            return CheckResult("ZhiPu (TTS/ASR)", False, f"认证失败 (401) key={_mask_key(api_key)}", latency)
+            return CheckResult("ZhiPu (TTS/ASR)", False, f"认证失败 (401) url={base_url}", latency)
         else:
             return CheckResult("ZhiPu (TTS/ASR)", False, f"HTTP {resp.status_code}: {resp.text[:100]}", latency)
     except Exception as e:
@@ -106,7 +99,7 @@ def check_vision() -> CheckResult:
         )
         latency = int((time.time() - t0) * 1000)
         content = resp.choices[0].message.content or ""
-        return CheckResult("Vision", True, f"model={model} key={_mask_key(api_key)} resp={content[:30]}", latency)
+        return CheckResult("Vision", True, f"model={model} url={base_url} resp={content[:30]}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
         return CheckResult("Vision", False, f"{type(e).__name__}: {e}", latency)
@@ -136,16 +129,16 @@ def check_image() -> CheckResult:
         latency = int((time.time() - t0) * 1000)
 
         if resp.status_code == 401:
-            return CheckResult("Image (DashScope)", False, f"认证失败 (401) key={_mask_key(api_key)}", latency)
+            return CheckResult("Image (DashScope)", False, f"认证失败 (401)", latency)
         elif resp.status_code == 400:
             # 400 说明认证通过了，只是参数不对
-            return CheckResult("Image (DashScope)", True, f"model={model} key={_mask_key(api_key)} auth_ok", latency)
+            return CheckResult("Image (DashScope)", True, f"model={model} auth_ok", latency)
         elif resp.status_code == 200:
-            return CheckResult("Image (DashScope)", True, f"model={model} key={_mask_key(api_key)}", latency)
+            return CheckResult("Image (DashScope)", True, f"model={model}", latency)
         else:
             # 其他状态码也可能是认证通过的
             data = resp.text[:100]
-            return CheckResult("Image (DashScope)", True, f"model={model} key={_mask_key(api_key)} HTTP={resp.status_code}", latency)
+            return CheckResult("Image (DashScope)", True, f"model={model} HTTP={resp.status_code}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
         return CheckResult("Image (DashScope)", False, f"{type(e).__name__}: {e}", latency)
@@ -167,11 +160,11 @@ def check_gpt_image() -> CheckResult:
         latency = int((time.time() - t0) * 1000)
 
         if resp.status_code == 401:
-            return CheckResult("GPT-Image", False, f"认证失败 (401) key={_mask_key(api_key)}", latency)
+            return CheckResult("GPT-Image", False, f"认证失败 (401) url={base_url}", latency)
         elif resp.status_code == 200:
-            return CheckResult("GPT-Image", True, f"model={model} key={_mask_key(api_key)} url={base_url}", latency)
+            return CheckResult("GPT-Image", True, f"model={model} url={base_url}", latency)
         else:
-            return CheckResult("GPT-Image", True, f"model={model} key={_mask_key(api_key)} HTTP={resp.status_code}", latency)
+            return CheckResult("GPT-Image", True, f"model={model} url={base_url} HTTP={resp.status_code}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
         return CheckResult("GPT-Image", False, f"{type(e).__name__}: {e}", latency)

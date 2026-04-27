@@ -63,36 +63,61 @@ SYSTEM_PROMPT = """# 角色
 5. 对输出的每一条新闻或项目，都进行一个简短、精准的概况描述。
 6. 输出内容总量应为：**10条AI技术新闻、10条时政金融新闻、5篇AI学术论文、5个AI开源项目**。"""
 
-SYSTEM_PROMPT_NEWS = """你是一位资深科技媒体编辑。根据提供的新闻素材，筛选出10条与AI/大模型/LLM/AIGC最相关的技术新闻。
+SYSTEM_PROMPT_NEWS = """你是一位资深科技媒体编辑。根据提供的新闻素材，筛选出10条与AI/大模型/LLM/AIGC/机器学习/深度学习最相关的技术新闻。
 
 要求：
 1. 每条新闻标题前加一个独特的Emoji
 2. 必须排除广告、营销、无关内容
 3. 每条包含：标题、简短概况描述（1-2句）、原始链接
-4. 用 Markdown 格式输出"""
+4. 不要输出二级标题（标题由外部添加）
+5. 必须输出10条，素材不足时尽量从现有素材中挖掘
+6. 严格按以下格式输出每条新闻：
+
+1. 🚀 **标题内容**  
+   简短概况描述。  
+   [https://原始链接](https://原始链接)"""
+
+SYSTEM_PROMPT_FINANCE = """你是一位资深财经媒体编辑。根据提供的新闻素材，筛选出10条最重要的时政金融新闻。
+
+重点关注：宏观经济、股市行情、央行政策、地缘政治、贸易政策、科技产业政策、行业监管等。
+要求：
+1. 每条新闻标题前加一个独特的Emoji
+2. 必须排除广告、营销、无关内容
+3. 每条包含：标题、简短概况描述（1-2句）、原始链接
+4. 不要输出二级标题（标题由外部添加）
+5. 必须输出10条，素材不足时尽量从现有素材中挖掘
+6. 严格按以下格式输出每条新闻：
+
+1. 💼 **标题内容**  
+   简短概况描述。  
+   [https://原始链接](https://原始链接)"""
 
 SYSTEM_PROMPT_PAPERS = """你是一位AI领域学术编辑。根据提供的论文素材，筛选出5篇最重要的AI学术论文。
 
 要求：
 1. 每篇论文标题前加一个独特的Emoji
 2. 每篇包含：标题、简短概况描述（1-2句）、原始链接
-3. 用 Markdown 格式输出"""
+3. 不要输出二级标题（标题由外部添加）
+4. 严格按以下格式输出每篇论文：
+
+1. 🔬 **标题内容**  
+   简短概况描述。  
+   [https://原始链接](https://原始链接)"""
 
 SYSTEM_PROMPT_PROJECTS = """你是一位开源项目观察者。根据提供的项目素材，筛选出5个最值得关注的AI开源项目。
 
 要求：
 1. 每个项目标题前加一个独特的Emoji
 2. 每个包含：名称+星数、简短概况描述（1-2句）、原始链接
-3. 用 Markdown 格式输出"""
+3. 不要输出二级标题（标题由外部添加）
+4. 严格按以下格式输出每个项目：
 
-SYSTEM_PROMPT_FINANCE = """你是一位资深财经媒体编辑。根据提供的新闻素材，筛选出10条最重要的时政金融新闻。
+1. 🐙 **项目名 (⭐星数)**  
+   简短概况描述。  
+   [https://原始链接](https://原始链接)"""
 
-重点关注：宏观经济、股市行情、央行政策、地缘政治、贸易政策、科技产业政策等。
-要求：
-1. 每条新闻标题前加一个独特的Emoji
-2. 必须排除广告、营销、无关内容
-3. 每条包含：标题、简短概况描述（1-2句）、原始链接
-4. 用 Markdown 格式输出"""
+
+
 
 
 # ── 获取今日日期 ──────────────────────────────────────────────────
@@ -251,40 +276,6 @@ def fetch_arxiv() -> list[dict]:
 
 # ── LLM 整合 ──────────────────────────────────────────────────────
 
-def _is_ai_related(item: dict) -> bool:
-    """粗筛：标题/描述是否与 AI 相关"""
-    ai_keywords = [
-        "AI", "ai", "人工智能", "大模型", "LLM", "llm", "GPT", "gpt",
-        "ChatGPT", "Claude", "Gemini", "DeepSeek", "AIGC", "aigc",
-        "机器学习", "深度学习", "神经网络", "自然语言", "NLP", "nlp",
-        "计算机视觉", "CV", "扩散模型", "Transformer", "Agent",
-        "多模态", "RAG", "微调", "Fine-tun", "OpenAI", "开源模型",
-        "语音合成", "TTS", "文生图", "视频生成", "Sora",
-        "Copilot", "Cursor", "推理模型", "o1", "o3", "o4",
-        "MCP", "Anthropic", "智谱", "GLM", "Qwen", "Llama",
-        "千问", "通义", "豆包", "Kimi", "文心",
-    ]
-    text = (item.get("title", "") + " " + item.get("description", "")).lower()
-    return any(kw.lower() in text for kw in ai_keywords)
-
-
-def _is_finance_related(item: dict) -> bool:
-    """粗筛：标题/描述是否与时政/金融/经济/宏观相关"""
-    finance_keywords = [
-        "经济", "金融", "股市", "A股", "港股", "美股", "纳斯达克", "道琼斯",
-        "央行", "降息", "加息", "利率", "货币", "汇率", "人民币", "美元",
-        "GDP", "通胀", "CPI", "PMI", "财政", "税收", "关税", "贸易",
-        "政策", "监管", "国务院", "两会", "改革开放",
-        "银行", "保险", "证券", "基金", "债券", "IPO", "融资",
-        "房地产", "楼市", "房价", "房贷",
-        "科技政策", "芯片政策", "半导体政策", "数据政策",
-        "地缘", "外交", "制裁", "关税战", "贸易战",
-        "美联储", "欧央行", "非农", "就业",
-    ]
-    text = (item.get("title", "") + " " + item.get("description", "")).lower()
-    return any(kw.lower() in text for kw in finance_keywords)
-
-
 def _call_llm_with_retry(
     client: OpenAI,
     model: str,
@@ -321,10 +312,21 @@ def _call_llm_with_retry(
     raise RuntimeError(f"[{label}] LLM 调用失败（重试 {max_retries} 次）: {last_error}")
 
 
+def _build_news_msg(today: str, news: list[dict], task_desc: str) -> str:
+    """构建新闻素材消息"""
+    msg = f"今天是 {today}，{task_desc}：\n\n"
+    for i, item in enumerate(news, 1):
+        msg += f"{i}. [{item['source']}] {item['title']}\n"
+        msg += f"   链接: {item['link']}\n"
+        if item.get("description"):
+            msg += f"   摘要: {item['description'][:150]}\n"
+        msg += "\n"
+    return msg
+
+
 def generate_daily_report(
     today: str,
-    ai_news: list[dict],
-    finance_news: list[dict],
+    news: list[dict],
     papers: list[dict],
     projects: list[dict],
     api_key: str,
@@ -336,27 +338,15 @@ def generate_daily_report(
 
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=90)
 
-    # ── 第 1 次：AI 新闻 ──
-    print("   🤖 生成 AI 新闻板块...")
-    ai_news_msg = f"今天是 {today}，请从以下新闻中筛选10条AI相关技术新闻：\n\n"
-    for i, item in enumerate(ai_news, 1):
-        ai_news_msg += f"{i}. [{item['source']}] {item['title']}\n"
-        ai_news_msg += f"   链接: {item['link']}\n"
-        if item.get("description"):
-            ai_news_msg += f"   摘要: {item['description'][:150]}\n"
-        ai_news_msg += "\n"
-    ai_news_section = _call_llm_with_retry(client, model, SYSTEM_PROMPT_NEWS, ai_news_msg, max_retries, label="AI新闻")
+    # ── 第 1 次：AI 技术新闻 ──
+    print("   🤖 生成 AI 技术新闻板块...")
+    ai_msg = _build_news_msg(today, news, "请从以下新闻中筛选出10条AI相关技术新闻")
+    ai_news_section = _call_llm_with_retry(client, model, SYSTEM_PROMPT_NEWS, ai_msg, max_retries, max_tokens=4096, label="AI新闻")
 
     # ── 第 2 次：时政金融新闻 ──
     print("   💰 生成时政金融新闻板块...")
-    fin_msg = f"今天是 {today}，请从以下新闻中筛选10条最重要的时政金融新闻：\n\n"
-    for i, item in enumerate(finance_news, 1):
-        fin_msg += f"{i}. [{item['source']}] {item['title']}\n"
-        fin_msg += f"   链接: {item['link']}\n"
-        if item.get("description"):
-            fin_msg += f"   摘要: {item['description'][:150]}\n"
-        fin_msg += "\n"
-    finance_section = _call_llm_with_retry(client, model, SYSTEM_PROMPT_FINANCE, fin_msg, max_retries, label="时政金融")
+    fin_msg = _build_news_msg(today, news, "请从以下新闻中筛选出10条最重要的时政金融新闻")
+    finance_section = _call_llm_with_retry(client, model, SYSTEM_PROMPT_FINANCE, fin_msg, max_retries, max_tokens=4096, label="时政金融")
 
     # ── 第 3 次：论文 ──
     print("   📄 生成 AI 论文板块...")
@@ -382,13 +372,13 @@ def generate_daily_report(
 
     # ── 合并 ──
     report = f"# AI日报 | {today}\n\n"
-    report += "## AI 技术新闻\n\n"
+    report += "## AI 技术新闻\n\n---\n\n"
     report += ai_news_section + "\n\n"
-    report += "## 时政金融新闻\n\n"
+    report += "## 时政金融新闻\n\n---\n\n"
     report += finance_section + "\n\n"
-    report += "## AI 学术论文\n\n"
+    report += "## AI 学术论文\n\n---\n\n"
     report += papers_section + "\n\n"
-    report += "## AI 开源项目\n\n"
+    report += "## AI 开源项目\n\n---\n\n"
     report += projects_section + "\n"
 
     return report
@@ -425,10 +415,10 @@ def run_ai_daily(
         all_news.extend(items)
     print(f"   合计: {len(all_news)} 条新闻")
 
-    # 2.5 分类筛选：AI 新闻 10 条 + 时政金融新闻 10 条
-    ai_filtered = [n for n in all_news if _is_ai_related(n)][:10]
-    finance_filtered = [n for n in all_news if _is_finance_related(n)][:10]
-    print(f"   AI 新闻: {len(ai_filtered)} 条, 时政金融: {len(finance_filtered)} 条")
+    # 2.5 全部新闻送入 LLM，由 LLM 分类筛选
+    # 不做关键词预筛选，避免遗漏；截断到 40 条控制 token 量
+    all_news = all_news[:40]
+    print(f"   送入 LLM: {len(all_news)} 条新闻")
 
     # 3. 抓取 Arxiv
     print("\n📄 抓取 Arxiv 论文...")
@@ -456,14 +446,13 @@ def run_ai_daily(
 
     # 6. LLM 整合（或直接输出原始素材）
     if no_llm:
-        report = _format_raw_report(today, ai_filtered, finance_filtered, papers, projects)
+        report = _format_raw_report(today, all_news, papers, projects)
     else:
         print("\n🧠 调用 LLM 生成日报...")
         api_key, base_url, model = get_llm_config()
         report = generate_daily_report(
             today=today,
-            ai_news=ai_filtered,
-            finance_news=finance_filtered,
+            news=all_news,
             papers=papers,
             projects=projects,
             api_key=api_key,
@@ -492,24 +481,15 @@ def run_ai_daily(
 
 def _format_raw_report(
     today: str,
-    ai_news: list[dict],
-    finance_news: list[dict],
+    news: list[dict],
     papers: list[dict],
     projects: list[dict],
 ) -> str:
     """无 LLM 时格式化原始素材"""
     lines = [f"# AI 日报 | {today}", "", "（原始素材，未经 LLM 整理）", ""]
 
-    lines.append("## AI 新闻素材\n")
-    for i, item in enumerate(ai_news, 1):
-        lines.append(f"{i}. [{item['source']}] {item['title']}")
-        lines.append(f"   链接: {item['link']}")
-        if item.get("description"):
-            lines.append(f"   摘要: {item['description'][:200]}")
-        lines.append("")
-
-    lines.append("## 时政金融新闻素材\n")
-    for i, item in enumerate(finance_news, 1):
+    lines.append("## 新闻素材\n")
+    for i, item in enumerate(news, 1):
         lines.append(f"{i}. [{item['source']}] {item['title']}")
         lines.append(f"   链接: {item['link']}")
         if item.get("description"):

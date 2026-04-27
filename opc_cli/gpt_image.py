@@ -8,11 +8,14 @@
 """
 
 import base64
+import json
+import re
 import time
 from pathlib import Path
 from typing import Optional
 
 import requests
+from openai import OpenAI
 
 
 # ── API 端点 ──────────────────────────────────────────────────────
@@ -41,6 +44,103 @@ POLL_INITIAL_DELAY = 15   # 首次查询前等待（秒）
 POLL_INTERVAL = 5          # 轮询间隔（秒）
 POLL_TIMEOUT = 300         # 最大等待时间（秒）
 
+# LLM 丰富提示词的系统指令
+ENHANCE_SYSTEM_PROMPT = """你是一位专业的 AI 绘图提示词专家，专门为 GPT-Image-2 模型优化提示词。用户会给你一段简短的图片描述，你需要将其扩展为结构化的 JSON 提示词。
+
+要求：
+1. 保持用户原始意图不变
+2. 将描述拆分为以下字段，用英文填写每个字段的值：
+   - style_and_tech: 画风、技术、摄影风格、质感（如 "cinematic lighting, shallow depth of field, 35mm film, warm tones"）
+   - subject: 主体描述（如人物外貌、年龄、特征、场景物体等）
+   - pose: 姿势、动作、构图描述
+   - expression: 表情、情绪描述（如无人物可省略）
+   - clothing: 服装、穿搭描述（如无人物可省略）
+   - vibe: 整体氛围、感觉、情绪基调
+   - aspect ratio: 宽高比（保持用户原始选择，默认 "2:3"）
+3. 如果用户描述中不涉及某个字段（如无人物则不需要 expression/clothing/pose），则省略该字段
+4. 每个字段的值用英文自然语言详细描述，用逗号分隔关键词
+5. 严格输出 JSON 格式，不要输出任何其他内容
+
+输出格式示例：
+```json
+{
+  "prompt": {
+    "style_and_tech": "cinematic lighting, shallow depth of field, 35mm film grain, warm golden hour tones, soft bokeh background",
+    "subject": "young woman with long wavy hair, standing in a flower field",
+    "pose": "looking over shoulder, gentle turn, hands holding a bouquet",
+    "expression": "serene and contemplative, soft smile",
+    "clothing": "flowing white linen dress, straw hat",
+    "vibe": "dreamy, nostalgic, peaceful summer afternoon",
+    "aspect ratio": "2:3"
+  }
+}
+```"""
+
+
+def enhance_prompt(
+    prompt: str,
+    llm_api_key: str,
+    llm_base_url: str,
+    llm_model: str,
+    aspect_ratio: str = DEFAULT_SIZE,
+) -> dict:
+    """使用 LLM 将简短提示词丰富为结构化 JSON 提示词
+
+    Args:
+        prompt: 原始简短提示词
+        llm_api_key: LLM API Key
+        llm_base_url: LLM API Base URL
+        llm_model: LLM 模型名称
+        aspect_ratio: 宽高比（如 "2:3", "16:9"）
+
+    Returns:
+        dict: {
+            "flat": "逗号拼接的扁平提示词（用于回退或展示）",
+            "json_str": "完整 JSON 字符串（用于 GPT-Image API 的 prompt 字段）",
+            "json_dict": {"prompt": {...}} 原始 dict
+        }
+        解析失败时 flat 和 json_str 均为原始 prompt
+    """
+    client = OpenAI(api_key=llm_api_key, base_url=llm_base_url)
+
+    user_msg = f"原始描述: {prompt}\n宽高比: {aspect_ratio}"
+    response = client.chat.completions.create(
+        model=llm_model,
+        messages=[
+            {"role": "system", "content": ENHANCE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.8,
+        max_tokens=1024,
+    )
+
+    content = response.choices[0].message.content.strip()
+
+    # 提取 JSON（兼容 markdown 代码块包裹）
+    json_match = re.search(r'\{[\s\S]*\}', content)
+    fallback = {"flat": prompt[:800], "json_str": prompt[:800], "json_dict": {}}
+    if not json_match:
+        return fallback
+
+    try:
+        data = json.loads(json_match.group())
+        prompt_obj = data.get("prompt", data)
+        # 拼接所有字段值（排除 aspect ratio）为扁平提示词
+        parts = []
+        for key, value in prompt_obj.items():
+            if key == "aspect ratio":
+                continue
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+        flat = ", ".join(parts) if parts else prompt
+        return {
+            "flat": flat[:800],
+            "json_str": json.dumps(data, ensure_ascii=False),
+            "json_dict": data,
+        }
+    except (json.JSONDecodeError, AttributeError):
+        return fallback
+
 
 def _build_proxies(proxy: Optional[str] = None) -> Optional[dict]:
     """构建 requests proxies 字典"""
@@ -59,11 +159,12 @@ def submit_generation(
     image_urls: Optional[list[str]] = None,
     n: int = 1,
     proxies: Optional[dict] = None,
+    prompt_json: Optional[str] = None,
 ) -> dict:
     """提交 GPT-Image-2 文生图任务
 
     Args:
-        prompt: 图像描述
+        prompt: 图像描述（扁平文本）
         api_key: API Key
         base_url: API Base URL
         model: 模型名称
@@ -72,6 +173,7 @@ def submit_generation(
         image_urls: 参考图列表（URL 或 base64 data URI）
         n: 生成张数（固定为 1）
         proxies: requests 代理字典
+        prompt_json: 结构化 JSON 提示词字符串（优先于 prompt）
 
     Returns:
         dict: {"task_id": "...", "status": "submitted"}
@@ -86,10 +188,10 @@ def submit_generation(
     if resolution == "4k" and size not in SIZE_4K_ONLY:
         raise ValueError(f"4K 仅支持比例: {', '.join(sorted(SIZE_4K_ONLY))}，当前 '{size}' 不支持 4K")
 
-    # 构建请求体
+    # 构建请求体（优先使用结构化 JSON prompt）
     body = {
         "model": model,
-        "prompt": prompt,
+        "prompt": prompt_json if prompt_json else prompt,
         "n": n,
         "size": size,
         "resolution": resolution,
@@ -207,11 +309,12 @@ def submit_and_wait(
     timeout: int = POLL_TIMEOUT,
     on_status: Optional[callable] = None,
     proxies: Optional[dict] = None,
+    prompt_json: Optional[str] = None,
 ) -> dict:
     """提交任务并等待完成（一站式调用）
 
     Args:
-        prompt: 图像描述
+        prompt: 图像描述（扁平文本）
         api_key: API Key
         base_url: API Base URL
         model: 模型名称
@@ -221,6 +324,7 @@ def submit_and_wait(
         timeout: 最大等待时间
         on_status: 状态回调函数
         proxies: requests 代理字典
+        prompt_json: 结构化 JSON 提示词字符串（优先于 prompt）
 
     Returns:
         dict: 最终结果
@@ -235,6 +339,7 @@ def submit_and_wait(
         resolution=resolution,
         image_urls=image_urls,
         proxies=proxies,
+        prompt_json=prompt_json,
     )
 
     task_id = submit_result["task_id"]

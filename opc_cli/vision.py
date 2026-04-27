@@ -73,8 +73,8 @@ def _is_url(text: str) -> bool:
 def understand_image(
     image: str,
     prompt: str = "请详细描述这张图片的内容",
-    model: str = "glm-5v-turbo",
-    max_tokens: int = 1024,
+    model: str = "",
+    max_tokens: int = 4096,
     temperature: float = 0.7,
 ) -> str:
     """
@@ -92,7 +92,9 @@ def understand_image(
     """
     from openai import OpenAI
 
-    api_key, base_url, _default_model = get_vision_config()
+    api_key, base_url, default_model = get_vision_config()
+    if not model:
+        model = default_model
 
     # 构建 image_url
     if _is_url(image):

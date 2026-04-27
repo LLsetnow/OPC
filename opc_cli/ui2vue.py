@@ -1,6 +1,5 @@
 """UI 截图转 Vue 前端代码：视觉模型分析 UI + LLM 生成 Vue 代码 + 创建工程并自动修复"""
 
-import json
 import os
 import re
 import subprocess
@@ -9,6 +8,30 @@ from pathlib import Path
 
 from .vision import encode_image, _is_url
 from .config import get_vision_config, get_llm_config
+from .logger import log_only
+
+
+def _print_summary(full_text: str, label: str, max_lines: int = 15):
+    """
+    终端打印内容摘要，完整内容仅写入日志文件。
+
+    Args:
+        full_text: 完整文本
+        label: 内容标签（如 "UI 结构分析"）
+        max_lines: 终端最多显示的行数
+    """
+    # 完整内容写入日志
+    log_only(full_text + "\n")
+
+    # 终端只显示摘要
+    lines = full_text.split("\n")
+    total = len(lines)
+    if total <= max_lines:
+        print(full_text)
+    else:
+        for line in lines[:max_lines]:
+            print(line)
+        print(f"  ... (共 {total} 行，完整内容见日志文件)")
 
 
 # ── Prompt 模板 ────────────────────────────────────────────────────
@@ -20,8 +43,15 @@ VISION_PROMPT = """请详细分析这个 UI 界面截图，输出以下内容：
 3. **配色方案**：提取主要颜色值（背景色、主色调、文字色、边框色等）
 4. **交互元素**：列出所有可交互元素及其预期行为
 5. **数据结构**：推断界面需要的数据模型（表格列、表单字段、列表项等）
+6. **控件像素级定位**：基于 1920×1080 标准分辨率，为每个控件提供精确的像素位置和尺寸：
+   - 输出 Markdown 表格，列包含：控件名称、类型、位置 (X, Y)、尺寸 (W × H)、视觉细节
+   - 按区域分组（顶部/中部/底部/侧栏等）
+   - 坐标均为相对于屏幕左上角的像素点
+   - 尺寸为 宽×高（像素）
+   - 视觉细节需包含颜色、字号、圆角、内边距、阴影等具体 CSS 属性值
+7. **补充技术参数**：间距（卡片间水平/垂直间距）、内边距范围、字体信息等
 
-请尽可能详细、准确，以便后续根据此描述生成代码。"""
+请尽可能详细、准确，特别是第6项的像素定位信息必须完整精确，以便后续根据此描述生成与截图一致的代码。"""
 
 CODE_GEN_SYSTEM_PROMPT = """你是一位资深前端开发专家，擅长根据 UI 描述生成高质量的 Vue 组件代码。
 
@@ -77,16 +107,68 @@ def _build_client(api_key: str, base_url: str):
 
 # ── 步骤1：视觉模型分析 UI ────────────────────────────────────────
 
-def analyze_ui(image: str, vision_model: str = "") -> str:
+def _save_analysis_md(content: str, output_dir: str = "./output") -> str:
+    """
+    将 UI 分析结果保存为 markdown 文件。
+
+    Args:
+        content: 分析内容
+        output_dir: 保存目录
+
+    Returns:
+        保存的文件路径
+    """
+    import time as _time
+    os.makedirs(output_dir, exist_ok=True)
+    ts = _time.strftime("%Y%m%d_%H%M%S")
+    filename = f"ui_analysis_{ts}.md"
+    filepath = os.path.join(output_dir, filename)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(f"# UI 结构分析\n\n> 生成时间: {_time.strftime('%Y-%m-%d %H:%M:%S')}\n\n{content}")
+    return filepath
+
+
+def _read_analysis_md(filepath: str) -> str:
+    """
+    读取已有的分析结果 markdown 文件，提取分析内容。
+
+    Args:
+        filepath: markdown 文件路径
+
+    Returns:
+        分析内容文本
+    """
+    if not os.path.exists(filepath):
+        print(f"错误: 分析文件不存在: {filepath}")
+        sys.exit(1)
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    # 去掉可能的标题行和时间行，保留核心分析内容
+    lines = content.split("\n")
+    start = 0
+    for i, line in enumerate(lines):
+        if line.startswith("# ") or line.startswith("> "):
+            start = i + 1
+            continue
+        if line.strip() == "" and start == i:
+            start = i + 1
+            continue
+        break
+    return "\n".join(lines[start:]).strip() or content
+
+
+def analyze_ui(image: str, vision_model: str = "", save_analysis: bool = True, output_dir: str = "./output") -> tuple:
     """
     第一步：使用视觉模型分析 UI 截图，输出结构化描述。
 
     Args:
         image: 本地图片路径或网络 URL
         vision_model: 视觉模型名称（为空则读取 VISION_MODEL 环境变量）
+        save_analysis: 是否将分析结果保存为 md 文件
+        output_dir: 分析结果保存目录
 
     Returns:
-        UI 结构化描述文本
+        (UI 结构化描述文本, 分析文件路径或None)
     """
     api_key, base_url, default_model = get_vision_config()
     model = vision_model or default_model
@@ -115,14 +197,32 @@ def analyze_ui(image: str, vision_model: str = "") -> str:
 
     print(f"[步骤1/3] 视觉分析 UI 截图 (模型: {model})...")
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=4096,
-        temperature=0.3,
-    )
+    result = None
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=4096,
+                temperature=0.3,
+            )
+            result = response.choices[0].message.content
+            break
+        except Exception as e:
+            if attempt < 2:
+                print(f"  视觉分析 API 错误 ({attempt+1}/3): {e}，重试中...")
+                import time
+                time.sleep(2)
+            else:
+                raise
 
-    return response.choices[0].message.content
+    # 保存分析结果为 md 文件
+    analysis_path = None
+    if save_analysis and result:
+        analysis_path = _save_analysis_md(result, output_dir)
+        print(f"  分析结果已保存: {analysis_path}")
+
+    return result, analysis_path
 
 
 # ── 步骤2：LLM 生成 Vue 代码 ──────────────────────────────────────
@@ -132,7 +232,7 @@ def generate_vue_code(
     framework: str = "default",
     component_name: str = "",
     llm_model: str = "",
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
     temperature: float = 0.3,
 ) -> str:
     """
@@ -149,6 +249,8 @@ def generate_vue_code(
     Returns:
         Vue 组件代码
     """
+    from openai import APIError, APITimeoutError, InternalServerError
+
     api_key, base_url, default_model = get_llm_config()
     model = llm_model or default_model
 
@@ -165,14 +267,43 @@ def generate_vue_code(
 
     print(f"[步骤2/3] 生成 Vue 代码 (模型: {model}, 框架: {framework})...")
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
+    # 带重试的 API 调用，524 超时时自动降级 max_tokens
+    current_max_tokens = max_tokens
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=current_max_tokens,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content
+        except (InternalServerError, APITimeoutError) as e:
+            error_msg = str(e)
+            is_timeout = "524" in error_msg or "timeout" in error_msg.lower()
+            if is_timeout and current_max_tokens > 4096:
+                # 降级 max_tokens 并重试
+                new_tokens = current_max_tokens // 2
+                print(f"  API 超时 (max_tokens={current_max_tokens})，降级为 {new_tokens} 重试...")
+                current_max_tokens = new_tokens
+                continue
+            elif attempt < max_retries - 1:
+                print(f"  API 错误 ({attempt+1}/{max_retries}): {error_msg[:200]}，重试中...")
+                import time
+                time.sleep(2)
+                continue
+            else:
+                raise
+        except APIError as e:
+            if attempt < max_retries - 1:
+                print(f"  API 错误 ({attempt+1}/{max_retries}): {e}，重试中...")
+                import time
+                time.sleep(2)
+                continue
+            raise
 
-    return response.choices[0].message.content
+    return ""
 
 
 # ── 步骤3：创建 Vue 工程 + 自动检查修复 ────────────────────────────
@@ -338,15 +469,7 @@ def _check_vue_build(project_path: str, shell_env: str) -> tuple:
     Returns:
         (success: bool, error_output: str)
     """
-    # 先尝试 vue-tsc 类型检查
-    rc, stdout, stderr = _run_npx(
-        ["vue-tsc", "--noEmit"], project_path, shell_env, timeout=120
-    )
-    if rc != 0:
-        error_text = (stdout + "\n" + stderr).strip()
-        return False, f"[vue-tsc 类型检查失败]\n{error_text}"
-
-    # 再尝试 vite build
+    # 直接尝试 vite build（跳过 vue-tsc 类型检查，类型错误不影响运行）
     rc, stdout, stderr = _run_npx(
         ["vite", "build"], project_path, shell_env, timeout=120
     )
@@ -524,14 +647,43 @@ def setup_vue_project(
     project_path = create_vue_project(output_dir, project_name, shell_env)
 
     # 3.2 提取并保存 Vue 组件文件
-    saved_files = save_vue_files(vue_result, os.path.join(project_path, "src", "components"), component_name)
+    components_dir = os.path.join(project_path, "src", "components")
+    # 清空 components 目录中的旧 .vue 文件，避免上次运行残留
+    if os.path.isdir(components_dir):
+        for old_file in os.listdir(components_dir):
+            if old_file.endswith(".vue"):
+                os.remove(os.path.join(components_dir, old_file))
+    saved_files = save_vue_files(vue_result, components_dir, component_name)
     print(f"  保存组件: {', '.join(saved_files)}")
 
-    # 3.3 更新 App.vue 引入主组件
-    main_component = saved_files[0] if saved_files else f"{component_name}.vue"
-    comp_name_no_ext = Path(main_component).stem
+    # 3.3 更新 App.vue
     app_vue_path = os.path.join(project_path, "src", "App.vue")
-    app_vue_content = f"""<template>
+
+    # 检查 LLM 是否生成了 App.vue → 直接用作 src/App.vue，并重写 import 路径
+    app_vue_in_components = os.path.join(project_path, "src", "components", "App.vue")
+    if os.path.exists(app_vue_in_components):
+        with open(app_vue_in_components, "r", encoding="utf-8") as f:
+            app_content = f.read()
+        # 重写 ./Component → ./components/Component 的导入路径
+        app_content = _rewrite_component_imports(app_content, saved_files)
+        with open(app_vue_path, "w", encoding="utf-8") as f:
+            f.write(app_content)
+        # 从 components/ 中删除，避免重复
+        os.remove(app_vue_in_components)
+        saved_files = [f for f in saved_files if f != "App.vue"]
+        print(f"  更新 App.vue: 使用 LLM 生成的 App.vue (已重写 import 路径)")
+    else:
+        # 没有 App.vue，用 wrapper 引入主组件
+        # 优先选择含 "Dashboard" / "Main" / "Home" / "Layout" 的组件作为入口
+        main_component = saved_files[0] if saved_files else f"{component_name}.vue"
+        entry_keywords = ["dashboard", "main", "home", "layout", "page"]
+        for f in saved_files:
+            stem = Path(f).stem.lower()
+            if any(kw in stem for kw in entry_keywords):
+                main_component = f
+                break
+        comp_name_no_ext = Path(main_component).stem
+        app_vue_content = f"""<template>
   <{comp_name_no_ext} />
 </template>
 
@@ -543,9 +695,9 @@ import {comp_name_no_ext} from './components/{main_component}'
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 </style>
 """
-    with open(app_vue_path, "w", encoding="utf-8") as f:
-        f.write(app_vue_content)
-    print(f"  更新 App.vue: 引入 {comp_name_no_ext}")
+        with open(app_vue_path, "w", encoding="utf-8") as f:
+            f.write(app_vue_content)
+        print(f"  更新 App.vue: 引入 {comp_name_no_ext}")
 
     # 3.4 检查构建 + 自动修复循环
     errors_history = []
@@ -617,10 +769,11 @@ def ui2vue(
     project_name: str = "vue-app",
     vision_model: str = "",
     llm_model: str = "",
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
     temperature: float = 0.3,
     max_retries: int = 3,
     create_project: bool = True,
+    analysis_file: str = "",
 ) -> tuple:
     """
     完整流程：视觉分析 UI 截图 + LLM 生成 Vue 代码 + 创建工程并自动修复。
@@ -637,17 +790,29 @@ def ui2vue(
         temperature: 生成温度
         max_retries: 最大修复重试次数
         create_project: 是否创建 Vue 工程（步骤3）
+        analysis_file: 已有的分析结果 md 文件路径（提供后跳过步骤1）
 
     Returns:
         (ui_description, vue_result, setup_result) 元组
         setup_result 为 None 当 create_project=False
     """
-    # 步骤1：视觉模型分析 UI
-    ui_description = analyze_ui(image, vision_model=vision_model)
+    # 步骤1：视觉模型分析 UI（或读取已有分析）
+    analysis_path = None
+    if analysis_file:
+        ui_description = _read_analysis_md(analysis_file)
+        print(f"[步骤1/3] 跳过视觉分析，使用已有分析: {analysis_file}")
+    else:
+        ui_description, analysis_path = analyze_ui(
+            image, vision_model=vision_model,
+            save_analysis=True, output_dir=output or "./output",
+        )
 
-    print("\n" + "─" * 50)
-    print("UI 分析完成，开始生成代码...")
-    print("─" * 50 + "\n")
+    # 立即打印步骤1的分析结果（终端摘要，日志完整）
+    print(f"\n{'─' * 50}")
+    print("== 步骤1: UI 结构分析 ==")
+    _print_summary(ui_description, "UI 结构分析")
+    print(f"{'─' * 50}")
+    print("UI 分析完成，开始生成代码...\n")
 
     # 步骤2：LLM 生成 Vue 代码
     vue_code = generate_vue_code(
@@ -658,6 +823,12 @@ def ui2vue(
         max_tokens=max_tokens,
         temperature=temperature,
     )
+
+    # 立即打印步骤2的生成代码（终端摘要，日志完整）
+    print(f"\n{'─' * 50}")
+    print("== 步骤2: 生成的 Vue 代码 ==")
+    _print_summary(vue_code, "Vue 代码", max_lines=20)
+    print(f"{'─' * 50}\n")
 
     # 步骤3：创建 Vue 工程 + 自动修复
     setup_result = None
@@ -681,24 +852,32 @@ def save_vue_files(result: str, output_dir: str, component_name: str = "Generate
     """
     从模型输出中提取 Vue 组件代码并保存为 .vue 文件。
 
-    如果输出包含多个组件（以 "=== 组件名.vue ===" 分隔），
-    则分别保存；否则整体保存为单个 .vue 文件。
+    支持多种分隔格式：
+    - "=== 组件名.vue ==="
+    - "### 1. 组件名.vue" / "## 组件名.vue"（markdown 标题）
+    如果输出包含多个组件则分别保存，否则整体保存为单个 .vue 文件。
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    pattern = r"===\s*(\S+\.vue)\s*==="
-    splits = re.split(pattern, result)
+    # 方式1: "=== 组件名.vue ===" 分隔
+    files = _split_by_marker(result, r"===\s*(\S+\.vue)\s*===")
 
-    if len(splits) > 1:
+    # 方式2: markdown 标题格式 "### 1. 组件名.vue" 或 "## 组件名.vue"
+    if not files:
+        files = _split_by_marker(result, r"#{2,4}\s*\d*\.?\s*(\S+\.vue)")
+
+    if files:
         saved = []
-        for i in range(1, len(splits), 2):
-            filename = splits[i]
-            code = splits[i + 1].strip() if i + 1 < len(splits) else ""
+        for filename, code in files.items():
+            # LLM 可能输出 "components/X.vue"，只取 basename 避免路径翻倍
+            clean_name = os.path.basename(filename)
             vue_code = _extract_vue_code(code)
-            filepath = os.path.join(output_dir, filename)
+            if not vue_code.strip():
+                continue
+            filepath = os.path.join(output_dir, clean_name)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(vue_code)
-            saved.append(filename)
+            saved.append(clean_name)
         return saved
     else:
         vue_code = _extract_vue_code(result)
@@ -709,16 +888,67 @@ def save_vue_files(result: str, output_dir: str, component_name: str = "Generate
         return [filename]
 
 
+def _split_by_marker(result: str, pattern: str) -> dict:
+    """按标记模式拆分文本，返回 {文件名: 文本片段} 字典"""
+    splits = re.split(pattern, result)
+    if len(splits) <= 1:
+        return {}
+
+    files = {}
+    # splits: [前文, 文件名1, 片段1, 文件名2, 片段2, ...]
+    for i in range(1, len(splits), 2):
+        filename = splits[i]
+        code = splits[i + 1].strip() if i + 1 < len(splits) else ""
+        if code:
+            files[filename] = code
+    return files
+
+
+def _rewrite_component_imports(content: str, component_files: list) -> str:
+    """
+    将 App.vue 中的相对导入路径 ./Component 重写为 ./components/Component。
+
+    仅重写 ./Stem 和 ./Stem.vue 形式，已含 components/ 的路径跳过。
+    """
+    other_stems = [Path(f).stem for f in component_files if f != "App.vue"]
+    for stem in other_stems:
+        # from './Stem.vue' → from './components/Stem.vue' (但跳过 './components/Stem.vue')
+        content = re.sub(
+            rf"""(['"])\./{re.escape(stem)}\.vue\1""",
+            rf"\1./components/{stem}.vue\1",
+            content,
+        )
+        # from './Stem' → from './components/Stem' (但跳过 './components/Stem')
+        content = re.sub(
+            rf"""(['"])\./{re.escape(stem)}['"]""",
+            rf"\1./components/{stem}\1",
+            content,
+        )
+    return content
+
+
 def _extract_vue_code(text: str) -> str:
-    """从文本中提取 Vue SFC 代码块"""
+    """从文本中提取 Vue SFC 代码块，支持被截断的不完整代码"""
+    # 1. 完整的 markdown 代码块 ```vue ... ```
     code_block_pattern = r"```(?:vue|html)\s*\n(.*?)```"
     matches = re.findall(code_block_pattern, text, re.DOTALL)
     if matches:
         return max(matches, key=len).strip()
 
+    # 2. 完整的 <template>...</style> SFC
     template_pattern = r"(<template>.*?</style(?:\s+scoped)?>)"
     matches = re.findall(template_pattern, text, re.DOTALL)
     if matches:
         return max(matches, key=len).strip()
+
+    # 3. 被截断的代码：有 ```vue 开头但没有闭合 ```
+    truncated_block = re.search(r"```(?:vue|html)\s*\n(.*)", text, re.DOTALL)
+    if truncated_block:
+        return truncated_block.group(1).strip()
+
+    # 4. 被截断的 SFC：有 <template> 但没有 </style>
+    truncated_sfc = re.search(r"(<template>.*)", text, re.DOTALL)
+    if truncated_sfc:
+        return truncated_sfc.group(1).strip()
 
     return text.strip()

@@ -557,11 +557,21 @@ def run_bili(
         print("仅下载音频模式，跳过后续步骤")
         return audio_path
 
+    # 创建视频同名子目录，将音频移入
     audio_base = Path(audio_path).stem
+    video_dir = os.path.join(output_dir, audio_base)
+    os.makedirs(video_dir, exist_ok=True)
+
+    new_audio_path = os.path.join(video_dir, Path(audio_path).name)
+    if audio_path != new_audio_path and os.path.exists(audio_path):
+        import shutil
+        shutil.move(audio_path, new_audio_path)
+        print(f"音频已移至: {new_audio_path}")
+    audio_path = new_audio_path
 
     # Step 2: ASR 或加载已有结果
     if skip_asr:
-        asr_result = load_asr_result(output_dir, audio_base=audio_base, asr_file=asr_file)
+        asr_result = load_asr_result(video_dir, audio_base=audio_base, asr_file=asr_file)
         if not asr_result:
             print("错误: 未找到可用的字幕文件，请使用 --asr-file 指定")
             sys.exit(1)
@@ -571,17 +581,18 @@ def run_bili(
             sys.exit(1)
         asr_result = asr_transcribe(audio_path)
 
-        srt_path = os.path.join(output_dir, f"{audio_base}.srt")
+        srt_path = os.path.join(video_dir, f"{audio_base}.srt")
         generate_srt(asr_result, srt_path)
 
-        raw_json_path = os.path.join(output_dir, f"{audio_base}.asr.json")
+        raw_json_path = os.path.join(video_dir, f"{audio_base}.asr.json")
         with open(raw_json_path, "w", encoding="utf-8") as f:
             json.dump(asr_result, f, ensure_ascii=False, indent=2)
 
     # Step 3: 总结
-    md_path = os.path.join(output_dir, f"{audio_base}.md")
+    md_path = os.path.join(video_dir, f"{audio_base}.md")
     summarize_content(asr_result, video_title=audio_base, output_path=md_path, video_url=url)
 
     print(f"\n===== 处理完成 =====")
+    print(f"  输出目录: {video_dir}")
     print(f"  内容总结: {md_path}")
     return md_path
