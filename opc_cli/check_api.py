@@ -55,11 +55,11 @@ def check_llm() -> CheckResult:
 
 
 def check_zhipu() -> CheckResult:
-    """测试智谱 API（列出音色）"""
+    """测试智谱 TTS API（列出音色）"""
     try:
         api_key, base_url = get_api_config()
     except SystemExit:
-        return CheckResult("ZhiPu (TTS/ASR)", False, "未配置 ZHIPU_API_KEY")
+        return CheckResult("ZhiPu (TTS)", False, "未配置 ZHIPU_API_KEY")
 
     t0 = time.time()
     try:
@@ -71,14 +71,41 @@ def check_zhipu() -> CheckResult:
         if resp.status_code == 200:
             data = resp.json()
             count = len(data.get("data", {}).get("voices", []))
-            return CheckResult("ZhiPu (TTS/ASR)", True, f"url={base_url} voices_ok", latency)
+            return CheckResult("ZhiPu (TTS)", True, f"url={base_url} voices_ok", latency)
         elif resp.status_code == 401:
-            return CheckResult("ZhiPu (TTS/ASR)", False, f"认证失败 (401) url={base_url}", latency)
+            return CheckResult("ZhiPu (TTS)", False, f"认证失败 (401) url={base_url}", latency)
         else:
-            return CheckResult("ZhiPu (TTS/ASR)", False, f"HTTP {resp.status_code}: {resp.text[:100]}", latency)
+            return CheckResult("ZhiPu (TTS)", False, f"HTTP {resp.status_code}: {resp.text[:100]}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
-        return CheckResult("ZhiPu (TTS/ASR)", False, f"{type(e).__name__}: {e}", latency)
+        return CheckResult("ZhiPu (TTS)", False, f"{type(e).__name__}: {e}", latency)
+
+
+def check_asr() -> CheckResult:
+    """测试阿里云 DashScope ASR API（验证 key 有效性）"""
+    try:
+        from .config import get_asr_config
+        api_key, model = get_asr_config()
+    except SystemExit:
+        return CheckResult("ASR (DashScope)", False, "未配置 IMAGE_API_KEY 或 ASR_API_KEY")
+
+    t0 = time.time()
+    try:
+        # 使用 DashScope 模型列表接口验证 key 有效性
+        url = "https://dashscope.aliyuncs.com/api/v1/models"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        latency = int((time.time() - t0) * 1000)
+
+        if resp.status_code == 200:
+            return CheckResult("ASR (DashScope)", True, f"model={model} key_ok", latency)
+        elif resp.status_code == 401:
+            return CheckResult("ASR (DashScope)", False, f"认证失败 (401) model={model}", latency)
+        else:
+            return CheckResult("ASR (DashScope)", True, f"model={model} key_probably_ok (HTTP {resp.status_code})", latency)
+    except Exception as e:
+        latency = int((time.time() - t0) * 1000)
+        return CheckResult("ASR (DashScope)", False, f"{type(e).__name__}: {e}", latency)
 
 
 def check_vision() -> CheckResult:
@@ -213,6 +240,7 @@ def check_cookies() -> CheckResult:
 CHECK_MAP: dict[str, callable] = {
     "llm": check_llm,
     "zhipu": check_zhipu,
+    "asr": check_asr,
     "vision": check_vision,
     "image": check_image,
     "gpt-image": check_gpt_image,

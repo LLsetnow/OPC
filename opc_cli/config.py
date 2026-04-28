@@ -108,6 +108,29 @@ def get_gpt_image_config() -> tuple:
     return api_key, base_url.rstrip("/"), model
 
 
+def get_asr_config() -> tuple:
+    """
+    获取 ASR 语音识别 API 配置，返回 (api_key, model)。
+    使用 DashScope SDK 的 Recognition 类（非 OpenAI 兼容模式）。
+    优先使用 ASR_API_KEY，
+    其次回退到 IMAGE_API_KEY（阿里云 DashScope），
+    最后回退到 DASHSCOPE_API_KEY。
+    """
+    api_key = (
+        os.environ.get("ASR_API_KEY")
+        or os.environ.get("IMAGE_API_KEY")
+        or os.environ.get("DASHSCOPE_API_KEY", "")
+    )
+    model = os.environ.get("ASR_MODEL", "fun-asr-realtime")
+
+    if not api_key:
+        print("错误: 未设置 ASR_API_KEY 或 IMAGE_API_KEY 环境变量")
+        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model
+
+
 def get_gpt_img_proxy() -> Optional[str]:
     """获取 gpt-img 专用代理地址，未设置则返回 None"""
     return os.environ.get("GPT_IMG_PROXY")

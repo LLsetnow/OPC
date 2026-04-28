@@ -5,10 +5,9 @@ import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-from .config import get_api_config, get_llm_config
+from .config import get_llm_config, get_asr_config
 
 
 # ── Step 1: 下载 Bilibili 音频 ────────────────────────────────────
@@ -102,32 +101,46 @@ def download_audio(url: str, output_dir: str, cookies: str = None) -> str:
 
 # ── Step 2: ASR 语音识别 ──────────────────────────────────────────
 
-def _convert_to_mp3(audio_path: str) -> str:
-    """将音频转为 MP3 格式（ASR 仅支持 wav/mp3）"""
+def _convert_to_wav(audio_path: str) -> str:
+    """将音频转为 WAV 16k 单声道格式（fun-asr-realtime 要求 16kHz 采样率）"""
     ext = Path(audio_path).suffix.lower()
-    if ext == ".mp3":
-        return audio_path
 
-    mp3_path = str(Path(audio_path).with_suffix(".mp3"))
-    if os.path.exists(mp3_path):
-        return mp3_path
+    # 即使是 wav，也要检查采样率是否为 16kHz，否则时间戳会出错
+    if ext == ".wav":
+        try:
+            import wave as _wave
+            with _wave.open(audio_path, "rb") as wf:
+                sr = wf.getframerate()
+                ch = wf.getnchannels()
+            if sr == 16000 and ch == 1:
+                return audio_path
+            print(f"wav 采样率={sr}Hz 声道数={ch}，需转换为 16kHz 单声道")
+        except Exception:
+            pass  # 读取失败则继续走转换流程
 
-    print(f"将 {ext} 音频转换为 MP3 格式...")
+    wav_path = str(Path(audio_path).with_suffix(".wav"))
+    # 如果需要转换，不使用已有缓存（可能采样率不对）
+    if ext == ".wav":
+        # 输入是 wav 但采样率不对，用临时路径避免覆盖原文件
+        wav_path = str(Path(audio_path).with_stem(Path(audio_path).stem + "_16k")) + ".wav"
+    elif os.path.exists(wav_path):
+        return wav_path
+
+    print(f"将 {ext} 音频转换为 WAV 格式...")
 
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", audio_path, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "128k", mp3_path],
+            ["ffmpeg", "-y", "-i", audio_path, "-vn", "-ar", "16000", "-ac", "1", wav_path],
             capture_output=True, check=True,
         )
-        if os.path.exists(mp3_path):
-            return mp3_path
+        if os.path.exists(wav_path):
+            return wav_path
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
 
     try:
         import soundfile as sf
         import numpy as np
-        wav_path = str(Path(audio_path).with_suffix(".wav"))
         wav, sr = sf.read(audio_path, dtype="float32")
         if wav.ndim > 1:
             wav = np.mean(wav, axis=1)
@@ -142,122 +155,289 @@ def _convert_to_mp3(audio_path: str) -> str:
     raise RuntimeError("无法转换音频格式，请安装 ffmpeg 或 soundfile")
 
 
-def _split_audio(audio_path: str, chunk_duration: int = 25) -> list:
-    """将音频按指定时长分片"""
-    import soundfile as sf
-    import numpy as np
+def asr_transcribe(audio_path: str, use_words: bool = True) -> dict:
+    """使用阿里云 DashScope fun-asr-realtime 进行语音识别
 
-    wav, sr = sf.read(audio_path, dtype="float32")
-    if wav.ndim > 1:
-        wav = np.mean(wav, axis=1)
+    基于 DashScope SDK 的 Recognition.call() 非流式接口，
+    支持本地文件直接识别，返回带精确时间戳的结果。
 
-    total_duration = len(wav) / sr
-    print(f"音频总时长: {total_duration:.1f}s，分片大小: {chunk_duration}s")
+    Args:
+        use_words: 是否提取词级时间戳（asr 命令用 True，bili 命令用 False）
+    """
+    import dashscope
+    from dashscope.audio.asr import Recognition
+    from http import HTTPStatus
 
-    if total_duration <= chunk_duration:
-        return [audio_path]
+    api_key, asr_model = get_asr_config()
+    dashscope.api_key = api_key
+    dashscope.base_websocket_api_url = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
 
-    chunk_paths = []
-    chunk_samples = int(chunk_duration * sr)
-    base = Path(audio_path).stem
-    out_dir = Path(audio_path).parent
+    print(f"使用模型 {asr_model} 进行语音识别（阿里云 DashScope）...")
 
-    for i, start in enumerate(range(0, len(wav), chunk_samples)):
-        end = min(start + chunk_samples, len(wav))
-        chunk = wav[start:end]
-        offset = start / sr
-        chunk_path = out_dir / f"{base}_chunk_{i:03d}.wav"
-        sf.write(str(chunk_path), chunk, sr)
-        chunk_paths.append((str(chunk_path), offset))
+    # 转换为 wav 16kHz（fun-asr-realtime 要求 16kHz 采样率）
+    audio_path = _convert_to_wav(audio_path)
 
-    print(f"已分为 {len(chunk_paths)} 个分片")
-    return chunk_paths
+    # 创建 Recognition 实例并调用非流式识别
+    recognition = Recognition(
+        model=asr_model,
+        format="wav",
+        sample_rate=16000,
+        callback=None,
+    )
+
+    result = recognition.call(audio_path)
+
+    if result.status_code != HTTPStatus.OK:
+        raise RuntimeError(f"ASR 识别失败: {result.message}")
+
+    # 解析结果
+    return _parse_recognition_result(result, use_words=use_words)
 
 
-def _call_asr_api(client, asr_model: str, audio_path: str, max_retries: int = 3) -> str:
-    """调用 ASR API"""
-    for attempt in range(1, max_retries + 1):
-        try:
-            with open(audio_path, "rb") as audio_file:
-                response = client.audio.transcriptions.create(model=asr_model, file=audio_file)
+def llm_fix_asr_text(raw_text: str) -> str:
+    """使用 LLM 修复 ASR 文本中的同音字/近音字和错字错误
 
-            if hasattr(response, 'choices') and response.choices:
-                return response.choices[0].message.content
-            elif hasattr(response, 'text'):
-                return response.text
-            return str(response)
-        except Exception as e:
-            if attempt < max_retries:
-                print(f"  ASR 请求失败（第 {attempt} 次）: {e}")
-                time.sleep(attempt * 3)
+    只修正错字，不改变断词和文本结构，以保留精确的时间戳映射。
+    """
+    from openai import OpenAI
+
+    api_key, base_url, llm_model = get_llm_config()
+    if not base_url.rstrip("/").endswith("/v1"):
+        base_url = base_url.rstrip("/") + "/v1"
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
+    prompt = f"""你是一个 ASR（语音识别）文本校对专家。以下是一段语音识别的原始输出，ASR 模型存在同音字/近音字识别错误，需要根据上下文语义纠正。
+
+**重要约束**：
+- 只修正同音字、近音字和明显的错字，不要改变断词、语序或文本结构
+- 保留原有的所有标点符号（句号、逗号等），不要增删或移动标点
+- 修正后文本的字符数必须与原文相同（逐字替换，不增不减）
+- 如果某个字不需要修正，保持原样即可
+
+常见同音/近音错误示例：
+- "几干" → "几千"
+- "5干度" → "5千度"
+- "近视温度" → "近似温度"
+- "密的" → "密得"
+
+直接输出修正后的文本，不要添加任何解释。
+
+--- 原始 ASR 文本 ---
+
+{raw_text}"""
+
+    response = client.chat.completions.create(
+        model=llm_model,
+        messages=[
+            {"role": "system", "content": "你是一个 ASR 文本校对专家，只修正同音字/近音字和错字，不改变断词、标点和文本结构。"},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.1,
+        max_tokens=4096,
+    )
+
+    corrected = response.choices[0].message.content
+    if not corrected:
+        print("警告: LLM 修复返回为空，使用原始文本")
+        return raw_text
+
+    corrected = corrected.strip()
+    print(f"LLM 文本修复完成: 原始 {len(raw_text)} 字 → 修正 {len(corrected)} 字")
+    return corrected
+
+
+def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
+    """后处理：将 ASR 片段按自然语句重新切分
+
+    优先使用词级时间戳（words）进行精确映射，退回到段落级线性插值。
+    如果使用 LLM 修正了文本，则按总时长比例估算时间。
+    """
+    segments = asr_result.get("segments", [])
+    if not segments:
+        return asr_result
+
+    # 1. 合并所有片段文本，构建词级时间线（比段落级更精确）
+    full_text = ""
+    # word_boundaries: [(char_start, char_end, start_sec, end_sec), ...]
+    word_boundaries = []
+    has_words = False
+
+    for seg in segments:
+        start_idx = len(full_text)
+        text = seg.get("text", "").strip()
+        if not text:
+            continue
+        full_text += text
+
+        seg_start_sec = _time_to_seconds(seg.get("start", "00:00:00.000"))
+        seg_end_sec = _time_to_seconds(seg.get("end", "00:00:00.000"))
+
+        words = seg.get("words", [])
+        if words:
+            has_words = True
+            # 检查词文本拼接是否与段文本一致
+            concatenated = "".join(w.get("text", "") for w in words)
+
+            if concatenated == text:
+                # 完美匹配：精确词级字符偏移
+                w_offset = 0
+                for w in words:
+                    w_text = w.get("text", "")
+                    w_len = len(w_text)
+                    word_boundaries.append((
+                        start_idx + w_offset,
+                        start_idx + w_offset + w_len,
+                        w["start_sec"],
+                        w["end_sec"],
+                    ))
+                    w_offset += w_len
             else:
-                raise
+                # 词文本与段文本不完全匹配（可能含标点差异）
+                # 按词字符数比例分配段内字符位置
+                total_word_chars = sum(len(w.get("text", "")) for w in words)
+                if total_word_chars > 0:
+                    w_offset = 0
+                    for w in words:
+                        w_text = w.get("text", "")
+                        w_len = len(w_text)
+                        char_start = start_idx + int(w_offset / total_word_chars * len(text))
+                        char_end = start_idx + int((w_offset + w_len) / total_word_chars * len(text))
+                        # 确保最后一个词覆盖到段末尾
+                        if w == words[-1]:
+                            char_end = start_idx + len(text)
+                        word_boundaries.append((char_start, char_end, w["start_sec"], w["end_sec"]))
+                        w_offset += w_len
+                else:
+                    word_boundaries.append((start_idx, start_idx + len(text), seg_start_sec, seg_end_sec))
+        else:
+            # 无词级数据：退回到段落级边界
+            word_boundaries.append((start_idx, start_idx + len(text), seg_start_sec, seg_end_sec))
 
+    if not word_boundaries:
+        return asr_result
 
-def asr_transcribe(audio_path: str) -> dict:
-    """使用 GLM-ASR 进行语音识别"""
-    try:
-        from zhipuai import ZhipuAI
-    except ImportError:
-        print("正在安装 zhipuai 包...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "zhipuai"], check=True)
-        from zhipuai import ZhipuAI
+    # 2. 可选：LLM 修复合并后的文本（修复断词、误加标点等）
+    if llm_fix:
+        print("使用 LLM 修复 ASR 文本...")
+        corrected_text = llm_fix_asr_text(full_text)
+    else:
+        corrected_text = full_text
 
-    api_key = os.environ.get("ZHIPU_API_KEY")
-    asr_model = os.environ.get("ASR_MODEL", "glm-asr-2512")
+    # 3. 按逗号逐句切分，每小句独立成段
+    SENTENCE_END = r'[。！？!?]'
+    COMMA = r'[，,；;：:]'
 
-    if not api_key:
-        raise ValueError("未设置 ZHIPU_API_KEY 环境变量")
+    # 先按句号切分出完整句子
+    raw_sentences = re.split(f'(?<={SENTENCE_END})', corrected_text)
+    raw_sentences = [s.strip() for s in raw_sentences if s.strip()]
 
-    audio_path = _convert_to_mp3(audio_path)
-    client = ZhipuAI(api_key=api_key)
-    print(f"使用模型 {asr_model} 进行语音识别...")
+    # 再按逗号切分，每小句独立成段
+    sentences = []
+    for sent in raw_sentences:
+        parts = re.split(f'(?<={COMMA})', sent)
+        parts = [p.strip() for p in parts if p.strip()]
+        for part in parts:
+            # 去掉末尾的逗号/分号等
+            part = re.sub(r'[，,；;：:]+$', '', part.strip())
+            if not part:
+                continue
+            # 确保每小句以句号结尾
+            if not re.search(r'[。！？!?]$', part):
+                part += '。'
+            sentences.append(part)
 
-    chunks = _split_audio(audio_path, chunk_duration=25)
-
-    if isinstance(chunks[0], str):
-        result_text = _call_asr_api(client, asr_model, chunks[0])
-        return _parse_asr_result(result_text)
-
-    all_segments = []
-    for i, (chunk_path, offset) in enumerate(chunks):
-        print(f"识别分片 {i + 1}/{len(chunks)}（偏移 {offset:.1f}s）...")
-        chunk_text = _call_asr_api(client, asr_model, chunk_path)
-        print(f"  结果: {chunk_text[:100]}...")
-        sub_segments = _split_text_to_segments(chunk_text, offset, chunk_duration=25)
-        all_segments.extend(sub_segments)
-        try:
-            os.remove(chunk_path)
-        except OSError:
-            pass
-
-    full_text = " ".join(seg["text"] for seg in all_segments if seg["text"])
-    return {"segments": all_segments, "raw_text": full_text}
-
-
-def _split_text_to_segments(text: str, offset: float, chunk_duration: int = 25) -> list:
-    """将文本按句子切分为带估算时间戳的 segment"""
-    sentences = re.split(r'(?<=[。！？!?])', text.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
     if not sentences:
-        return []
+        return asr_result
 
-    total_chars = sum(len(s) for s in sentences)
-    segments = []
-    current_time = offset
+    # 4. 根据字符位置映射时间戳（使用词级时间线，比段落级更精确）
+    if has_words:
+        print(f"使用词级时间戳映射（{len(word_boundaries)} 个词）")
+
+    # 如果 LLM 修正了文本，建立 corrected→original 字符位置对齐
+    char_map = None  # char_map[i] = corrected_text[i] 对应的 full_text 字符位置
+    if llm_fix and corrected_text != full_text:
+        from difflib import SequenceMatcher
+        sm = SequenceMatcher(None, full_text, corrected_text, autojunk=False)
+        char_map = {}
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == 'equal':
+                for k in range(j2 - j1):
+                    char_map[j1 + k] = i1 + k
+            elif tag == 'replace':
+                # 替换：按顺序对齐，多余字符映射到最近的原始位置
+                src_len = i2 - i1
+                dst_len = j2 - j1
+                for k in range(dst_len):
+                    char_map[j1 + k] = i1 + min(k, src_len - 1)
+            # delete: 原文有而修正文没有，跳过
+            # insert: 修正文多出的字符，映射到前一个原始位置
+            elif tag == 'insert':
+                prev_orig = char_map.get(j1 - 1, i1)
+                for k in range(j2 - j1):
+                    char_map[j1 + k] = prev_orig
+        print(f"LLM 修正后字符对齐: {len(char_map)} 个字符映射到原文")
+
+    new_segments = []
+    char_pos = 0
 
     for sent in sentences:
-        char_ratio = len(sent) / total_chars if total_chars > 0 else 1 / len(sentences)
-        duration = chunk_duration * char_ratio
-        end_time = current_time + duration
-        segments.append({
-            "start": _seconds_to_time(current_time),
-            "end": _seconds_to_time(end_time),
+        sent_chars = len(sent)
+
+        # 统一使用词级时间线映射，不再对 llm_fix 做比例估算
+        if char_map is not None:
+            # LLM 修正后：通过字符对齐映射回原文位置
+            orig_start = char_map.get(char_pos, 0)
+            orig_end = char_map.get(char_pos + sent_chars - 1, len(full_text) - 1)
+            start_sec = _map_char_to_time(orig_start, word_boundaries)
+            end_sec = _map_char_to_time(orig_end + 1, word_boundaries)
+        else:
+            # 使用词级时间线映射字符位置到时间
+            start_sec = _map_char_to_time(char_pos, word_boundaries)
+            end_sec = _map_char_to_time(char_pos + sent_chars, word_boundaries)
+
+        # 确保结束时间 > 开始时间
+        if end_sec <= start_sec:
+            end_sec = start_sec + max(1.0, sent_chars * 0.15)
+
+        new_segments.append({
+            "start": _seconds_to_time(start_sec),
+            "end": _seconds_to_time(end_sec),
             "text": sent,
         })
-        current_time = end_time
+        char_pos += sent_chars
 
-    return segments
+    return {
+        "segments": new_segments,
+        "raw_text": "".join(s["text"] for s in new_segments),
+    }
+
+
+def _map_char_to_time(char_idx: int, boundaries: list) -> float:
+    """将字符位置映射到时间（线性插值）"""
+    for start_char, end_char, start_sec, end_sec in boundaries:
+        if start_char <= char_idx <= end_char:
+            if end_char == start_char:
+                return start_sec
+            ratio = (char_idx - start_char) / (end_char - start_char)
+            return start_sec + ratio * (end_sec - start_sec)
+    # 超出范围，返回最后一个时间
+    if boundaries:
+        return boundaries[-1][3]
+    return 0.0
+
+
+def _time_to_seconds(ts: str) -> float:
+    """将时间戳字符串转为秒数"""
+    ts = ts.strip().replace(",", ".")
+    parts = ts.split(":")
+    if len(parts) == 3:
+        h, m, s = parts
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    elif len(parts) == 2:
+        m, s = parts
+        return int(m) * 60 + float(s)
+    return 0.0
 
 
 def _seconds_to_time(seconds: float) -> str:
@@ -268,48 +448,77 @@ def _seconds_to_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 
-def _parse_asr_result(text: str) -> dict:
-    """解析 ASR 返回结果"""
+def _parse_recognition_result(result, use_words: bool = True) -> dict:
+    """解析 DashScope Recognition.call() 返回的结果
+
+    RecognitionResult.get_sentence() 返回 dict:
+    {"begin_time": ms, "end_time": ms, "text": "...", "words": [...]}
+    非流式调用返回的是所有句子的 list。
+
+    words 中每个词的格式:
+    {"text": "词", "begin_time": ms, "end_time": ms}
+
+    Args:
+        use_words: 是否提取词级时间戳，False 则只保留段落级
+    """
+    sentence = result.get_sentence()
     segments = []
 
-    json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
-    if json_match:
-        try:
-            data = json.loads(json_match.group(1))
-            if isinstance(data, list):
-                segments = data
-            elif isinstance(data, dict) and "segments" in data:
-                segments = data["segments"]
-        except json.JSONDecodeError:
-            pass
+    # 非流式 call() 返回 list[sentence]
+    if isinstance(sentence, list):
+        sentences = sentence
+    elif isinstance(sentence, dict) and "text" in sentence:
+        sentences = [sentence]
+    else:
+        sentences = []
+
+    for sent in sentences:
+        begin_ms = sent.get("begin_time", 0)
+        end_ms = sent.get("end_time", 0)
+        text = sent.get("text", "").strip()
+        if not text:
+            continue
+
+        start_sec = begin_ms / 1000.0
+        end_sec = end_ms / 1000.0
+
+        # 确保结束时间 > 开始时间
+        if end_sec <= start_sec:
+            end_sec = start_sec + max(1.0, len(text) * 0.15)
+
+        # 提取词级时间戳（仅 asr 命令需要）
+        words_data = []
+        if use_words:
+            for w in sent.get("words", []):
+                w_text = w.get("text", "")
+                w_begin_ms = w.get("begin_time", 0)
+                w_end_ms = w.get("end_time", 0)
+                if w_text:
+                    w_start_sec = w_begin_ms / 1000.0
+                    w_end_sec = w_end_ms / 1000.0
+                    if w_end_sec <= w_start_sec:
+                        w_end_sec = w_start_sec + max(0.1, len(w_text) * 0.1)
+                    words_data.append({
+                        "text": w_text,
+                        "start_sec": w_start_sec,
+                        "end_sec": w_end_sec,
+                    })
+
+        seg_dict = {
+            "start": _seconds_to_time(start_sec),
+            "end": _seconds_to_time(end_sec),
+            "text": text,
+        }
+        if use_words:
+            seg_dict["words"] = words_data
+        segments.append(seg_dict)
 
     if not segments:
-        pattern = r'\[?(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*[-—>]+\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})\]?\s*(.+)'
-        for line in text.strip().split("\n"):
-            m = re.match(pattern, line.strip())
-            if m:
-                segments.append({
-                    "start": m.group(1).replace(",", "."),
-                    "end": m.group(2).replace(",", "."),
-                    "text": m.group(3).strip(),
-                })
+        print("警告: 未能解析出带时间戳的段落")
+        return {"segments": [], "raw_text": ""}
 
-    if not segments:
-        pattern2 = r'(\d{2}:\d{2}:\d{2})\s*[-—>]+\s*(\d{2}:\d{2}:\d{2})\s*(.+)'
-        for line in text.strip().split("\n"):
-            m = re.match(pattern2, line.strip())
-            if m:
-                segments.append({
-                    "start": m.group(1) + ".000",
-                    "end": m.group(2) + ".000",
-                    "text": m.group(3).strip(),
-                })
-
-    if not segments:
-        print("警告: 未能解析出带时间戳的段落，将整段文本作为一条记录")
-        segments.append({"start": "00:00:00.000", "end": "99:99:99.000", "text": text.strip()})
-
-    return {"segments": segments, "raw_text": text}
+    raw_text = "".join(s["text"] for s in segments)
+    return {"segments": segments, "raw_text": raw_text}
 
 
 # ── Step 3: SRT 文件 ──────────────────────────────────────────────
@@ -380,7 +589,8 @@ def load_asr_result(output_dir: str, audio_base: str = None, asr_file: str = Non
             print(f"从 SRT 文件加载: {srt_path}")
             return result
 
-    json_files = list(Path(output_dir).glob("*.asr.json"))
+    # 在 output_dir 及其子目录中搜索（优先取最新修改的文件）
+    json_files = list(Path(output_dir).rglob("*.asr.json"))
     if json_files:
         latest = max(json_files, key=os.path.getmtime)
         with open(str(latest), "r", encoding="utf-8") as f:
@@ -389,7 +599,7 @@ def load_asr_result(output_dir: str, audio_base: str = None, asr_file: str = Non
             print(f"从 ASR JSON 文件加载: {latest}")
             return result
 
-    srt_files = list(Path(output_dir).glob("*.srt"))
+    srt_files = list(Path(output_dir).rglob("*.srt"))
     if srt_files:
         latest = max(srt_files, key=os.path.getmtime)
         result = parse_srt(str(latest))
@@ -440,7 +650,15 @@ def _add_video_links(md_content: str, video_url: str) -> str:
         seconds = _timestamp_to_seconds(ts)
         return f"[{ts}]({base_url}?t={seconds})"
 
-    result = re.sub(r'`\[(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?)\]`', replace_timestamp, md_content)
+    # 匹配被反引号包裹的时间戳范围，如 `[00:01:35]-[00:06:20]` 或 `[00:01:35]`
+    # 先处理反引号内的范围
+    def replace_backtick_range(match):
+        inner = match.group(1)
+        # 逐个替换内部的时间戳
+        return re.sub(r'\[(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?)\]', replace_timestamp, inner)
+
+    result = re.sub(r'`(\[[\d:.\-\]]+\])`', replace_backtick_range, md_content)
+    # 再处理未被反引号包裹的裸时间戳
     result = re.sub(r'\[(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?)\](?!\()', replace_timestamp, result)
     return result
 
@@ -531,23 +749,33 @@ def run_bili(
     audio_file: str = None,
     skip_asr: bool = False,
     asr_file: str = None,
+    llm_fix: bool = False,
 ):
-    """B站视频转写主流程"""
+    """B站视频转写主流程
+
+    自动检测：确定了视频目录后，若该目录下已有字幕文件则自动跳过 ASR。
+    """
     output_dir = os.path.abspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
+
+    audio_exts = {".m4a", ".mp3", ".wav", ".ogg", ".opus", ".webm", ".mp4"}
 
     # Step 1: 下载音频
     if skip_download:
         if audio_file:
             audio_path = os.path.abspath(audio_file)
         else:
-            audio_files = list(Path(output_dir).glob("*.m4a"))
+            # 在 output_dir 中搜索音频文件
+            audio_files = []
+            for ext in audio_exts:
+                audio_files.extend(Path(output_dir).glob(f"*{ext}"))
+                if not audio_files:
+                    audio_files.extend(Path(output_dir).rglob(f"*{ext}"))
             if not audio_files:
-                audio_files = list(Path(output_dir).glob("*.mp3"))
-            if not audio_files:
-                print("错误: 未找到音频文件，请使用 --audio-file 指定")
+                print(f"错误: 未找到音频文件，请在 --output-dir ({output_dir}) 中放入音频文件，或使用 --audio-file 指定")
                 sys.exit(1)
-            audio_path = str(audio_files[0])
+            # 选最新修改的文件
+            audio_path = str(max(audio_files, key=os.path.getmtime))
         print(f"使用已有音频文件: {audio_path}")
     else:
         cookies = cookies or os.environ.get("YT_DLP_COOKIES")
@@ -569,6 +797,21 @@ def run_bili(
         print(f"音频已移至: {new_audio_path}")
     audio_path = new_audio_path
 
+    # ── 自动检测：该视频目录下是否已有字幕文件 ──
+    if not skip_asr and not asr_file:
+        json_path = os.path.join(video_dir, f"{audio_base}.asr.json")
+        srt_path = os.path.join(video_dir, f"{audio_base}.srt")
+        if os.path.exists(json_path):
+            print(f"检测到已有字幕文件: {json_path}")
+            print("自动跳过 ASR（如需重新识别请删除该文件）")
+            skip_asr = True
+            asr_file = json_path
+        elif os.path.exists(srt_path):
+            print(f"检测到已有字幕文件: {srt_path}")
+            print("自动跳过 ASR（如需重新识别请删除该文件）")
+            skip_asr = True
+            asr_file = srt_path
+
     # Step 2: ASR 或加载已有结果
     if skip_asr:
         asr_result = load_asr_result(video_dir, audio_base=audio_base, asr_file=asr_file)
@@ -576,10 +819,10 @@ def run_bili(
             print("错误: 未找到可用的字幕文件，请使用 --asr-file 指定")
             sys.exit(1)
     else:
-        if not os.environ.get("ZHIPU_API_KEY"):
-            print("错误: 未设置 ZHIPU_API_KEY 环境变量")
-            sys.exit(1)
-        asr_result = asr_transcribe(audio_path)
+        asr_result = asr_transcribe(audio_path, use_words=False)
+
+        # 自动重断句
+        asr_result = resegment_asr(asr_result, llm_fix=llm_fix)
 
         srt_path = os.path.join(video_dir, f"{audio_base}.srt")
         generate_srt(asr_result, srt_path)

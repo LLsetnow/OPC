@@ -16,7 +16,7 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(errors="replace")
 
 from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy
-from .bili import run_bili
+from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .local_tts import (
     load_model as _local_load_model,
@@ -65,7 +65,7 @@ console = Console()
 
 @app.command()
 def bili(
-    url: str = typer.Argument(help="Bilibili 视频链接"),
+    url: str = typer.Argument("", help="Bilibili 视频链接（--skip-download 时可省略）"),
     output_dir: str = typer.Option("./output", "-o", "--output-dir", help="输出目录"),
     cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
     audio_only: bool = typer.Option(False, "--audio-only", help="仅下载音频，不进行 ASR"),
@@ -73,10 +73,19 @@ def bili(
     audio_file: Optional[str] = typer.Option(None, "--audio-file", help="指定已有音频文件路径"),
     skip_asr: bool = typer.Option(False, "--skip-asr", help="跳过 ASR，使用已有字幕文件生成总结"),
     asr_file: Optional[str] = typer.Option(None, "--asr-file", help="指定已有 ASR JSON 或 SRT 文件路径"),
+    llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """B站视频下载 + ASR 转写 + 内容总结"""
+    """B站视频下载 + ASR 转写 + 内容总结
+
+    自动检测：视频目录下已有字幕文件则跳过ASR。
+    """
     load_env(env_file)
+
+    if not url and not skip_download:
+        console.print("[red]错误: 请提供 Bilibili 视频链接，或使用 --skip-download 跳过下载[/red]")
+        raise typer.Exit(1)
+
     run_bili(
         url=url,
         output_dir=output_dir,
@@ -86,7 +95,75 @@ def bili(
         audio_file=audio_file,
         skip_asr=skip_asr,
         asr_file=asr_file,
+        llm_fix=llm_fix,
     )
+
+
+# ── asr 子命令 ────────────────────────────────────────────────────
+
+@app.command()
+def asr(
+    audio: str = typer.Argument(..., help="输入音频文件路径（.wav/.mp3/.m4a 等）"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认与输入文件同目录）"),
+    no_resegment: bool = typer.Option(False, "--no-resegment", help="禁用自动重断句（保留 ASR 原始切分）"),
+    llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
+):
+    """语音识别（ASR）：将音频文件转写为 SRT 和 JSON 字幕文件
+
+    使用阿里云 DashScope fun-asr-realtime 模型，支持精确时间戳。
+
+    示例:
+
+        opc asr audio.wav
+
+        opc asr recording.mp3 -o ./output
+    """
+    load_env()
+
+    audio_path = Path(audio)
+    if not audio_path.exists():
+        console.print(f"[red]错误: 文件不存在: {audio}[/red]")
+        raise typer.Exit(1)
+
+    if audio_path.suffix.lower() not in (".wav", ".mp3", ".m4a", ".webm", ".ogg", ".opus"):
+        console.print(f"[red]错误: 不支持的音频格式: {audio_path.suffix}（支持 .wav/.mp3/.m4a/.webm/.ogg/.opus）[/red]")
+        raise typer.Exit(1)
+
+    # 输出目录：默认与输入文件同目录
+    if output_dir:
+        out_dir = Path(output_dir)
+    else:
+        out_dir = audio_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_base = audio_path.stem
+    srt_path = out_dir / f"{audio_base}.srt"
+    json_path = out_dir / f"{audio_base}.asr.json"
+
+    console.print(f"[bold]=== ASR 语音识别 ===[/bold]")
+    console.print(f"输入: {audio_path}")
+    console.print(f"输出: {out_dir}")
+
+    # ASR 转写（asr_transcribe 内部会自动转换格式）
+    asr_result = asr_transcribe(str(audio_path))
+
+    # 自动重断句：按自然语句重新切分
+    if not no_resegment:
+        console.print("[dim]  自动重断句（按逗号逐句切分）...[/dim]")
+        asr_result = resegment_asr(asr_result, llm_fix=llm_fix)
+
+    # 生成 SRT
+    generate_srt(asr_result, str(srt_path))
+
+    # 生成 JSON
+    with open(str(json_path), "w", encoding="utf-8") as f:
+        import json
+        json.dump(asr_result, f, ensure_ascii=False, indent=2)
+    console.print(f"ASR JSON 已保存: {json_path}")
+
+    console.print(f"\n[green]完成![/green]")
+    console.print(f"  SRT:  {srt_path}")
+    console.print(f"  JSON: {json_path}")
 
 
 # ── tts 子命令 ────────────────────────────────────────────────────
@@ -193,7 +270,7 @@ def tts(
 
 @app.command("local-tts")
 def local_tts(
-    text: str = typer.Argument("", help="要转换为语音的文本（serve/stop/status/unload 时可省略）"),
+    text: str = typer.Argument("", help="要转换为语音的文本，或 .txt/.md 文件路径"),
     output: str = typer.Option("output.wav", "-o", "--output", help="输出文件路径"),
     mode: str = typer.Option("custom", "-m", "--mode", help="模型变体: custom=预设音色, design=设计音色, base=语音克隆"),
     speaker: str = typer.Option("Vivian", "-s", "--speaker", help="预设音色名称（custom 模式）"),
@@ -273,6 +350,22 @@ def local_tts(
     if not text:
         console.print("[red]错误: 语音合成需要提供文本参数，或使用 --serve/--stop/--status/--unload[/red]")
         raise typer.Exit(1)
+
+    # 文本输入：支持直接文本或读取 .txt/.md 文件
+    from pathlib import Path as _Path
+    _text_path = _Path(text)
+    _is_file_input = False
+    if _text_path.exists() and _text_path.suffix.lower() in (".txt", ".md"):
+        _is_file_input = True
+        text = _text_path.read_text(encoding="utf-8").strip()
+        console.print(f"[dim]  已读取文件: {_text_path.name} ({len(text)} 字)[/dim]")
+        if not text:
+            console.print(f"[red]错误: 文件内容为空: {_text_path}[/red]")
+            raise typer.Exit(1)
+        # 未指定 -o 时，在源文件同目录生成同名 .wav
+        if output == "output.wav":
+            output = str(_text_path.with_suffix(".wav"))
+            console.print(f"[dim]  输出路径: {output}[/dim]")
 
     # 参数校验
     if mode not in ("custom", "design", "base"):
