@@ -937,8 +937,7 @@ def check_api(
 
 @app.command("news")
 def ai_daily(
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出文件完整路径（优先级高于 --output-dir）"),
-    output_dir: Optional[str] = typer.Option(None, "-d", "--output-dir", help="输出目录，文件名默认 ai_daily_YYYY-MM-DD.md"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出路径，支持文件路径或目录路径（目录时文件名默认 ai_daily_YYYY-MM-DD.md）"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
     no_llm: bool = typer.Option(False, "--no-llm", help="不调用 LLM，仅输出原始素材"),
     save_raw: bool = typer.Option(False, "--save-raw", help="额外保存原始 JSON 数据"),
@@ -948,7 +947,7 @@ def ai_daily(
     信息来源：36氪、虎嗅、IT之家、InfoQ（RSS）、GitHub、Arxiv
     使用 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置大模型
     """
-    run_ai_daily(output=output, output_dir=output_dir, env_file=env_file, no_llm=no_llm, save_raw=save_raw)
+    run_ai_daily(output=output, env_file=env_file, no_llm=no_llm, save_raw=save_raw)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────

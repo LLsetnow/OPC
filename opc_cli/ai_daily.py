@@ -388,7 +388,6 @@ def generate_daily_report(
 
 def run_ai_daily(
     output: Optional[str] = None,
-    output_dir: Optional[str] = None,
     env_file: Optional[str] = None,
     no_llm: bool = False,
     save_raw: bool = False,
@@ -462,11 +461,14 @@ def run_ai_daily(
 
     # 7. 输出
     if output:
-        # --output 指定完整文件路径，优先级最高
         out_path = Path(output)
-    elif output_dir:
-        # --output-dir 指定目录，文件名默认 ai_daily_YYYY-MM-DD.md
-        out_path = Path(output_dir) / f"ai_daily_{today}.md"
+        # 如果路径以 / 结尾或已存在目录，视为目录路径
+        if output.endswith("/") or out_path.is_dir():
+            out_path = out_path / f"ai_daily_{today}.md"
+        # 如果路径没有扩展名且不是已存在的文件，也视为目录
+        elif not out_path.suffix and not out_path.is_file():
+            out_path.mkdir(parents=True, exist_ok=True)
+            out_path = out_path / f"ai_daily_{today}.md"
     else:
         # 默认保存到 output/ 目录
         out_path = Path("output") / f"ai_daily_{today}.md"
