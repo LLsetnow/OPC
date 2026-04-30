@@ -321,6 +321,10 @@ async def _http_handler(connection, request):
 
     path = request.path
 
+    # WebSocket 升级请求 → 放行，不拦截
+    if path == "/ws/voice-chat":
+        return None
+
     if path == "/api/voices":
         api_key = os.environ.get("QWEN_TTS_API_KEY", "")
         voices = list_voices(api_key)
