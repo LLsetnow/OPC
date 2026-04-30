@@ -1,5 +1,9 @@
 /**
- * Web Audio API 排队播放 Float32 PCM、清空队列（打断用）
+ * Web Audio API 段落式排队播放 Float32 PCM
+ *
+ * - 每次 tts_start/tts_end 之间的 PCM 收集为一个"段落"
+ * - 段落内所有 chunk 合并为一整段 buffer 后播放，消除 chunk 间隙
+ * - 上一段播完后才播放下一段，保证严格顺序
  */
 import { ref, onUnmounted } from 'vue'
 
@@ -8,9 +12,16 @@ export function useAudioPlayer() {
 
   let audioContext = null
   let sampleRate = 24000
-  let playQueue = []
+
+  // 段落队列：每个元素是一段完整的 Float32Array
+  let segmentQueue = []
+  // 当前正在收集的段落 chunks
+  let currentChunks = []
+  let currentChunkLen = 0
+
   let isProcessing = false
   let currentSource = null
+  let _cancelled = false
 
   function _ensureContext() {
     if (!audioContext || audioContext.state === 'closed') {
@@ -31,9 +42,37 @@ export function useAudioPlayer() {
     }
   }
 
-  function enqueue(pcmFloat32Array) {
+  /** 标记一个 TTS 段落开始 */
+  function startSegment() {
     _ensureContext()
-    playQueue.push(pcmFloat32Array)
+    _cancelled = false
+    currentChunks = []
+    currentChunkLen = 0
+  }
+
+  /** 往当前段落追加 PCM 数据 */
+  function enqueue(pcmFloat32Array) {
+    if (!pcmFloat32Array || pcmFloat32Array.length === 0) return
+    currentChunks.push(pcmFloat32Array)
+    currentChunkLen += pcmFloat32Array.length
+  }
+
+  /** 标记当前段落结束，合并并加入播放队列 */
+  function endSegment() {
+    if (currentChunkLen === 0) return
+
+    // 合并所有 chunk 为一段连续 buffer
+    const merged = new Float32Array(currentChunkLen)
+    let offset = 0
+    for (const chunk of currentChunks) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+
+    segmentQueue.push(merged)
+    currentChunks = []
+    currentChunkLen = 0
+
     if (!isProcessing) {
       _processQueue()
     }
@@ -43,8 +82,10 @@ export function useAudioPlayer() {
     isProcessing = true
     isPlaying.value = true
 
-    while (playQueue.length > 0) {
-      const pcm = playQueue.shift()
+    while (segmentQueue.length > 0) {
+      if (_cancelled) break
+
+      const pcm = segmentQueue.shift()
       if (!pcm || pcm.length === 0) continue
 
       try {
@@ -75,7 +116,10 @@ export function useAudioPlayer() {
   }
 
   function clearQueue() {
-    playQueue = []
+    _cancelled = true
+    segmentQueue = []
+    currentChunks = []
+    currentChunkLen = 0
     if (currentSource) {
       try {
         currentSource.stop()
@@ -103,7 +147,9 @@ export function useAudioPlayer() {
   return {
     isPlaying,
     setSampleRate,
+    startSegment,
     enqueue,
+    endSegment,
     clearQueue,
     stopAll,
   }

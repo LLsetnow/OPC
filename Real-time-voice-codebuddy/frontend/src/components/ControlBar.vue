@@ -1,5 +1,11 @@
 <template>
   <div class="control-bar">
+    <!-- 录音波形动画 -->
+    <Transition name="wave-slide">
+      <div v-if="isRecording" class="waveform-wrapper">
+        <VoiceWaveform state="listening" :volume="volume" :barCount="20" />
+      </div>
+    </Transition>
     <div class="input-row">
       <input
         v-model="textInput"
@@ -42,12 +48,14 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import VoiceWaveform from './VoiceWaveform.vue'
 
 const props = defineProps({
   isRecording: { type: Boolean, default: false },
   isPlaying: { type: Boolean, default: false },
   micEnabled: { type: Boolean, default: true },
   state: { type: String, default: 'idle' },
+  volume: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['send-text', 'start-voice', 'stop-voice', 'open-settings'])
@@ -84,6 +92,29 @@ function handleMicClick() {
 .control-bar {
   padding: 12px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.waveform-wrapper {
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.wave-slide-enter-active,
+.wave-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.wave-slide-enter-from,
+.wave-slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+}
+
+.wave-slide-enter-to,
+.wave-slide-leave-from {
+  max-height: 60px;
+  opacity: 1;
 }
 
 .input-row {

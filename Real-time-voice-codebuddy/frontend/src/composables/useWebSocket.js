@@ -3,7 +3,10 @@
  */
 import { ref, onUnmounted } from 'vue'
 
-const WS_URL = `ws://${location.hostname}:9902/ws/voice-chat`
+// 开发模式走 Vite 代理，生产模式直连后端
+const WS_URL = import.meta.env.DEV
+  ? `ws://${location.host}/ws/voice-chat`
+  : `ws://${location.hostname}:9902/ws/voice-chat`
 
 export function useWebSocket() {
   const ws = ref(null)
@@ -13,6 +16,7 @@ export function useWebSocket() {
 
   const handlers = {
     status: null,
+    config: null,
     asr_partial: null,
     asr_final: null,
     llm_delta: null,
@@ -61,7 +65,9 @@ export function useWebSocket() {
           if (buf.byteLength < 5) return
           const view = new Uint8Array(buf)
           if (view[0] === 0x02) {
-            const pcm = new Float32Array(buf, 1)
+            // 跳过 1 字节前缀，拷贝到 4 字节对齐的新 buffer
+            const pcmBuf = buf.slice(1)
+            const pcm = new Float32Array(pcmBuf)
             handlers.tts_audio?.(pcm)
           }
         })
@@ -114,7 +120,7 @@ export function useWebSocket() {
   }
 
   onUnmounted(() => {
-    disconnect()
+    // 只在组件真正卸载时断开，避免 composable 初始化时误触发
   })
 
   return {

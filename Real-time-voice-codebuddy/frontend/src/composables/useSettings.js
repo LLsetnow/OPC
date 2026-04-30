@@ -33,7 +33,7 @@ const modelConfig = reactive({
   llm_model: defaults?.llm_model || 'deepseek-v4-flash',
   llm_api_key: defaults?.llm_api_key || '',
   llm_base_url: defaults?.llm_base_url || 'https://api.deepseek.com',
-  tts_model: defaults?.tts_model || 'cosyvoice-v3.5-flash',
+  tts_model: defaults?.tts_model || 'cosyvoice-v3-flash',
   tts_api_key: defaults?.tts_api_key || '',
 })
 
@@ -52,6 +52,9 @@ function _save() {
 watch([voice, instruction, micEnabled, selectedDeviceId], _save)
 watch(modelConfig, _save, { deep: true })
 
+  // 是否有 localStorage 保存的设置（区分首次用户与回访用户）
+  const hasSavedSettings = !!defaults
+
 export function useSettings() {
   function getUpdateConfigMsg() {
     const msg = { type: 'update_config' }
@@ -68,6 +71,7 @@ export function useSettings() {
   }
 
   return {
+    hasSavedSettings,
     voice,
     instruction,
     micEnabled,

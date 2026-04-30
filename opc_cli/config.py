@@ -131,6 +131,24 @@ def get_asr_config() -> tuple:
     return api_key, model
 
 
+def get_qwen_tts_config() -> tuple:
+    """
+    获取阿里云 Qwen TTS（CosyVoice）API 配置，返回 (api_key, model)。
+    使用 DashScope SDK 的 SpeechSynthesizer 类（WebSocket 协议）。
+    优先使用 QWEN_TTS_API_KEY / QWEN_TTS_MODEL，
+    其次回退到 IMAGE_API_KEY（阿里云 DashScope）。
+    """
+    api_key = os.environ.get("QWEN_TTS_API_KEY") or os.environ.get("IMAGE_API_KEY", "")
+    model = os.environ.get("QWEN_TTS_MODEL", "cosyvoice-v3.5-flash")
+
+    if not api_key:
+        print("错误: 未设置 QWEN_TTS_API_KEY 或 IMAGE_API_KEY 环境变量")
+        print("请在 .env 文件中添加: QWEN_TTS_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model
+
+
 def get_gpt_img_proxy() -> Optional[str]:
     """获取 gpt-img 专用代理地址，未设置则返回 None"""
     return os.environ.get("GPT_IMG_PROXY")

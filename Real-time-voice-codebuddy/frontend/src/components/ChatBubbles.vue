@@ -7,7 +7,7 @@
       :class="msg.role"
     >
       <div class="bubble" :class="[msg.role, { interrupted: msg.interrupted }]">
-        <span class="bubble-text">{{ msg.text }}</span>
+        <span class="bubble-text" v-html="formatText(msg.text)"></span>
         <span v-if="msg.interrupted" class="interrupted-mark">（被打断）</span>
       </div>
     </div>
@@ -18,7 +18,7 @@
     </div>
     <div v-if="llmPartial" class="bubble-wrapper assistant">
       <div class="bubble assistant llm-partial">
-        <span class="bubble-text">{{ llmPartial }}<span class="cursor">|</span></span>
+        <span class="bubble-text" v-html="formatText(llmPartial) + '<span class=\'cursor\'>|</span>'"></span>
       </div>
     </div>
   </div>
@@ -34,6 +34,17 @@ const props = defineProps({
 })
 
 const container = ref(null)
+
+function formatText(text) {
+  if (!text) return ''
+  // 转义 HTML 特殊字符
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // 括号内的动作描述用斜体样式
+  return escaped.replace(/([（(][^）)]*[）)])/g, '<span class="action-text">$1</span>')
+}
 
 watch(
   () => [props.messages.length, props.asrPartial, props.llmPartial],
@@ -116,6 +127,12 @@ watch(
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
   margin-left: 6px;
+}
+
+.action-text {
+  color: rgba(180, 160, 255, 0.7);
+  font-style: italic;
+  font-size: 12px;
 }
 
 @keyframes fadeInUp {

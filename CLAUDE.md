@@ -72,4 +72,8 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 
 # 本地TTS（需要 qwen3-tts-venv）
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc local-tts '你好' -o output.wav"
+
+# 加载tts模型（启动本地tts服务， 这可能会需要等待60秒）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc local-tts --serve --mode custom"
+
 ```

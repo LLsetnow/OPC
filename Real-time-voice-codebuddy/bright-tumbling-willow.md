@@ -1,4 +1,4 @@
-# Real-time-voice 实时语音对话 Web 应用 — 技术方案
+# Real-time-voice-codebuddy 实时语音对话 Web 应用 — 技术方案
 
 ## Context
 
@@ -279,7 +279,7 @@ sequenceDiagram
 | `emotion` | `{"type":"emotion","affection":3,"trust":2}` | 好感/信任变化 |
 | `error` | `{"type":"error","message":"..."}` | 错误信息 |
 
-## 后端模块设计（全部在 Real-time-voice/ 下独立重写）
+## 后端模块设计（全部在 Real-time-voice-codebuddy/ 下独立重写）
 
 ### 1. ASR 模块 (`asr_client.py`)
 
@@ -324,7 +324,7 @@ sequenceDiagram
 
 **独立的日志系统**，将所有终端输出同时写入日志文件：
 
-- 日志目录：`Real-time-voice/logs/`
+- 日志目录：`Real-time-voice-codebuddy/logs/`
 - 文件名格式：`YYYY-MM-DD.log`（如 `2026-04-30.log`）
 - 同一天日志追加到同一文件，跨天自动创建新文件
 - 日志格式：`[HH:MM:SS] [LEVEL] message`
@@ -333,7 +333,7 @@ sequenceDiagram
 - 实现方式：自定义 `logging.Handler`，按日期轮转文件名
 
 ```
-Real-time-voice/logs/
+Real-time-voice-codebuddy/logs/
 ├── 2026-04-29.log
 ├── 2026-04-30.log
 └── 2026-05-01.log
@@ -350,7 +350,7 @@ Real-time-voice/logs/
 ## 目录结构
 
 ```
-Real-time-voice/
+Real-time-voice-codebuddy/
 ├── server.py              # WebSocket + HTTP 服务主入口
 ├── asr_client.py          # Fun-ASR Realtime WebSocket 封装
 ├── llm_client.py          # LLM SSE 流式调用 + 会话上下文
@@ -434,7 +434,7 @@ Events:
 
 ## 关键设计决策
 
-1. **TTS 模块独立重写**：不在 Real-time-voice 中 import opc_cli 的任何模块。所有 TTS 逻辑（SSE 流式合成、音色查询、WAV 解析）在 `Real-time-voice/tts_client.py` 中从零实现。API Key 从 `.env` 直接读取（通过 `python-dotenv`，硬编码路径指向项目根 `.env`）。
+1. **TTS 模块独立重写**：不在 Real-time-voice-codebuddy 中 import opc_cli 的任何模块。所有 TTS 逻辑（SSE 流式合成、音色查询、WAV 解析）在 `Real-time-voice-codebuddy/tts_client.py` 中从零实现。API Key 从 `.env` 直接读取（通过 `python-dotenv`，硬编码路径指向项目根 `.env`）。
 
 2. **Microphone 设备枚举**：使用 `navigator.mediaDevices.enumerateDevices()` 获取音频输入设备列表，用户可在设置面板中选择。
 
@@ -554,7 +554,7 @@ stateDiagram-v2
 
 ## 实施步骤
 
-1. 创建 `Real-time-voice/` 目录结构
+1. 创建 `Real-time-voice-codebuddy/` 目录结构
 2. 初始化 Vite + Vue 3 前端项目
 3. 实现 6 个 Vue 组件（ParticleBg → CharacterPanel → ChatBubbles → VoiceWaveform → ControlBar → SettingsPanel）
 4. 实现 4 个 composables（useWebSocket → useMicrophone → useAudioPlayer → useSettings）
@@ -568,7 +568,7 @@ stateDiagram-v2
 
 ## 验证方式
 
-1. 启动后端：`cd Real-time-voice && python server.py --port 9902`
+1. 启动后端：`cd Real-time-voice-codebuddy && python server.py --port 9902`
 2. 启动前端：`cd frontend && npm run dev`
 3. 浏览器打开 Vite 开发地址
 4. 测试语音输入：点击麦克风 → 说话 → ASR 文本显示 → LLM 气泡 + TTS 播放

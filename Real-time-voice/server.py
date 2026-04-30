@@ -74,10 +74,14 @@ class VoiceChatSession:
         self._current_asr = None
         self._current_llm_task = None
         self._tts_queue = asyncio.Queue()
+        self._voice_active = False  # 麦克风是否开启（持续语音模式）
 
         # 好感度
         self.affection = 0
         self.trust = 0
+
+        # 性能计时（每次 pipeline 重置）
+        self._timing = {}
 
     async def handle_message(self, raw):
         """消息路由"""
@@ -110,12 +114,23 @@ class VoiceChatSession:
     # ── 语音输入 ──────────────────────────────────────────────────
 
     async def _handle_start_voice(self, msg):
+        # 如果 ASR 已在运行，说明麦克风一直开着，这是重复点击 → 关闭
+        if self._current_asr:
+            await self._handle_stop_voice()
+            return
+
         if self.state == STATE_THINKING or self.state == STATE_SPEAKING:
             await self._handle_interrupt()
 
+        self._voice_active = True
+        await self._start_asr()
+
+    async def _start_asr(self):
+        """创建 ASR 连接并开始监听"""
         from asr_client import ASRClient
 
         self.state = STATE_LISTENING
+        self._timing["asr_start"] = time.time()
         await _send_json(self.ws, type="status", state=STATE_LISTENING)
 
         asr = ASRClient(self.asr_api_key, self.asr_model)
@@ -136,21 +151,37 @@ class VoiceChatSession:
         except Exception as e:
             self.logger.error(f"[ASR] 连接失败: {e}")
             await _send_json(self.ws, type="error", message=f"ASR连接失败: {e}")
+            self._current_asr = None
             self.state = STATE_IDLE
 
     async def _on_asr_final(self, text: str):
-        """ASR 识别到最终结果 → 触发 LLM 流程"""
-        if self.state != STATE_LISTENING:
+        """ASR 识别到最终结果 → 关闭 ASR 防止超时，触发 LLM 流程"""
+        if self.state not in (STATE_LISTENING, STATE_THINKING, STATE_SPEAKING):
             return
+        # 当前正在回复中 → 打断
+        if self.state in (STATE_THINKING, STATE_SPEAKING):
+            await self._handle_interrupt()
+        asr_start = self._timing.get("asr_start", time.time())
+        self._timing["asr_duration"] = time.time() - asr_start
         self.logger.info(f"[会话] ASR final: {text}")
         await _send_json(self.ws, type="asr_final", text=text)
+
+        # 关闭 ASR 连接，避免 THINKING/SPEAKING 期间无音频导致服务端超时
+        if self._current_asr:
+            await self._current_asr.close()
+            self._current_asr = None
+
         await self._start_llm_tts_pipeline(text)
 
     async def _handle_stop_voice(self):
+        """关闭麦克风，结束 ASR 监听"""
+        self._voice_active = False
         if self._current_asr:
             await self._current_asr.finish()
             await self._current_asr.close()
             self._current_asr = None
+        self.state = STATE_IDLE
+        await _send_json(self.ws, type="status", state=STATE_IDLE)
 
     # ── 文字输入 ──────────────────────────────────────────────────
 
@@ -169,13 +200,22 @@ class VoiceChatSession:
         self._cancel_event.clear()
         await _send_json(self.ws, type="status", state=STATE_THINKING)
 
+        # ── 计时 ──
+        self._timing["tts_first_packet"] = 0
+        self._timing["total_audio_duration"] = 0
+        t_pipeline_start = time.time()
+        t_llm_first_token = 0.0
+        tts_chunk_count = 0
+        tts_chunk_texts = []
+
         try:
             import httpx
             from llm_client import generate_llm_stream, should_trigger_tts, prepare_tts_text, extract_emotion_tags
 
             text_buffer = ""
             tts_tasks = []
-            full_text = ""  # 初始化，防止 async for 未执行
+            full_text = ""
+            llm_first = True
 
             async for token, full_text, is_done in generate_llm_stream(
                 user_text=user_text,
@@ -189,22 +229,32 @@ class VoiceChatSession:
                     return
 
                 if token:
+                    if llm_first:
+                        t_llm_first_token = time.time()
+                        llm_first = False
                     await _send_json(self.ws, type="llm_delta", text=token)
                     text_buffer += token
 
                     if should_trigger_tts(text_buffer):
-                        tts_text = prepare_tts_text(text_buffer)
+                        tts_text, text_buffer = prepare_tts_text(text_buffer)
                         if tts_text.strip():
-                            t = asyncio.create_task(self._tts_synthesize(tts_text))
+                            tts_chunk_count += 1
+                            tts_chunk_texts.append(tts_text)
+                            t = asyncio.create_task(
+                                self._tts_synthesize(tts_text, tts_chunk_count))
                             tts_tasks.append(t)
-                        text_buffer = ""
 
-                if is_done and text_buffer.strip():
-                    tts_text = prepare_tts_text(text_buffer)
-                    if tts_text.strip():
-                        t = asyncio.create_task(self._tts_synthesize(tts_text))
-                        tts_tasks.append(t)
-                    text_buffer = ""
+                if is_done:
+                    while text_buffer.strip():
+                        tts_text, text_buffer = prepare_tts_text(text_buffer)
+                        if tts_text.strip():
+                            tts_chunk_count += 1
+                            tts_chunk_texts.append(tts_text)
+                            t = asyncio.create_task(
+                                self._tts_synthesize(tts_text, tts_chunk_count))
+                            tts_tasks.append(t)
+                        else:
+                            break
 
             await _send_json(self.ws, type="llm_done")
 
@@ -220,17 +270,50 @@ class VoiceChatSession:
             if tts_tasks:
                 await asyncio.gather(*tts_tasks, return_exceptions=True)
 
-            self.state = STATE_IDLE
-            await _send_json(self.ws, type="status", state=STATE_IDLE)
+            # 语音模式仍然开启 → 重连 ASR 继续监听
+            if self._voice_active:
+                await self._start_asr()
+            else:
+                self.state = STATE_IDLE
+                await _send_json(self.ws, type="status", state=self.state)
             await _send_json(self.ws, type="tts_end")
+
+            # ── 打印性能统计 ──
+            t_now = time.time()
+            asr_time = self._timing.get("asr_duration", 0)
+            llm_latency = t_llm_first_token - t_pipeline_start if t_llm_first_token > 0 else 0
+            tts_first = self._timing.get("tts_first_packet", 0)
+            tts_latency = tts_first - t_llm_first_token if tts_first > 0 and t_llm_first_token > 0 else 0
+            total_time = t_now - t_pipeline_start
+            total_audio = self._timing.get("total_audio_duration", 0)
+            rtf = total_time / total_audio if total_audio > 0 else 0
+
+            self.logger.info(
+                f"[性能] 语音完成! {asr_time:.1f}s | "
+                f"LLM首响应 {llm_latency:.1f}s, "
+                f"TTS首包 {tts_latency:.1f}s, "
+                f"总耗时 {total_time:.1f}s | "
+                f"RTF {rtf:.2f} | "
+                f"输出 {len(full_text)} 字"
+            )
+
+            # ── 打印 TTS 分块详情 ──
+            if tts_chunk_texts:
+                total_chunks = len(tts_chunk_texts)
+                self.logger.info(f"[TTS分块] 共 {total_chunks} 块：")
+                for i, ct in enumerate(tts_chunk_texts, 1):
+                    self.logger.info(f"  [{i}/{total_chunks}] {ct}")
 
         except Exception as e:
             self.logger.error(f"[会话] LLM/TTS 管道异常: {e}")
             await _send_json(self.ws, type="error", message=str(e))
-            self.state = STATE_IDLE
-            await _send_json(self.ws, type="status", state=STATE_IDLE)
+            if self._voice_active:
+                await self._start_asr()
+            else:
+                self.state = STATE_IDLE
+                await _send_json(self.ws, type="status", state=self.state)
 
-    async def _tts_synthesize(self, text: str):
+    async def _tts_synthesize(self, text: str, chunk_index: int = 0):
         """执行单次 TTS 合成并发送音频"""
         from tts_client import generate_tts_stream
 
@@ -240,8 +323,10 @@ class VoiceChatSession:
         self.state = STATE_SPEAKING
         await _send_json(self.ws, type="status", state=STATE_SPEAKING)
 
+        t_chunk_start = time.time()
         try:
             first_audio = True
+            chunk_audio_samples = 0
             for pcm_bytes, sr, is_final in generate_tts_stream(
                 text=text,
                 voice=self.tts_voice,
@@ -253,17 +338,23 @@ class VoiceChatSession:
                     return
 
                 if first_audio and not is_final:
+                    # 记录首个 TTS 首包时间
+                    if self._timing.get("tts_first_packet", 0) == 0:
+                        self._timing["tts_first_packet"] = time.time()
                     await _send_json(self.ws, type="tts_start", sample_rate=sr)
                     first_audio = False
 
                 if pcm_bytes and not is_final:
                     await _send_audio(self.ws, pcm_bytes)
+                    chunk_audio_samples += len(pcm_bytes) // 4  # float32 = 4 bytes
 
-            self.logger.debug(f"[TTS] 块合成完成: {text[:30]}...")
+            chunk_duration = chunk_audio_samples / sr if sr > 0 else 0
+            self._timing["total_audio_duration"] = self._timing.get("total_audio_duration", 0) + chunk_duration
+            self.logger.debug(f"[TTS] 块#{chunk_index} 完成: {text[:30]}... ({chunk_duration:.1f}s)")
 
         except Exception as e:
             if not self._cancel_event.is_set():
-                self.logger.error(f"[TTS] 合成失败: {e}")
+                self.logger.error(f"[TTS] 块#{chunk_index} 合成失败: {e}")
 
     # ── 打断 ──────────────────────────────────────────────────────
 
@@ -271,16 +362,12 @@ class VoiceChatSession:
         self.logger.info("[会话] 收到打断请求")
         self._cancel_event.set()
 
-        # 取消 ASR
+        # ASR 保持运行，继续监听下一句
         if self._current_asr:
-            try:
-                await self._current_asr.close()
-            except Exception:
-                pass
-            self._current_asr = None
-
-        self.state = STATE_IDLE
-        await _send_json(self.ws, type="status", state=STATE_IDLE)
+            self.state = STATE_LISTENING
+        else:
+            self.state = STATE_IDLE
+        await _send_json(self.ws, type="status", state=self.state)
 
     # ── 配置更新 ──────────────────────────────────────────────────
 

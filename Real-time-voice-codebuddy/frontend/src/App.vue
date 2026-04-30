@@ -44,15 +44,12 @@
 
       <!-- 底部控制栏 -->
       <div class="bottom-area">
-        <VoiceWaveform
-          :state="currentState"
-          :volume="micVolume"
-        />
         <ControlBar
           :isRecording="mic.isRecording.value"
           :isPlaying="player.isPlaying.value"
           :micEnabled="settings.micEnabled.value"
           :state="currentState"
+          :volume="micVolume"
           @send-text="handleSendText"
           @start-voice="handleStartVoice"
           @stop-voice="handleStopVoice"
@@ -82,11 +79,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import ParticleBg from './components/ParticleBg.vue'
 import CharacterPanel from './components/CharacterPanel.vue'
 import ChatBubbles from './components/ChatBubbles.vue'
-import VoiceWaveform from './components/VoiceWaveform.vue'
 import ControlBar from './components/ControlBar.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import { useWebSocket } from './composables/useWebSocket'
@@ -113,10 +109,30 @@ const voices = ref([])
 
 // 当前正在生成的 AI 消息（用于打断标记）
 let currentAiMsgIdx = -1
+let _initialConfigApplied = false
 
 // ── WebSocket 事件处理 ──────────────────────────────────
 ws.on('status', (msg) => {
   currentState.value = msg.state
+})
+
+ws.on('config', (msg) => {
+  // 仅首次连接时处理
+  if (_initialConfigApplied) return
+  _initialConfigApplied = true
+
+  if (settings.hasSavedSettings.value) {
+    // 回访用户：前端 localStorage 为准，同步给服务端
+    syncConfig()
+  } else {
+    // 首次用户：使用服务端默认配置
+    if (msg.voice) settings.voice.value = msg.voice
+    if (msg.instruction) settings.instruction.value = msg.instruction
+    if (msg.asr_model) settings.modelConfig.asr_model = msg.asr_model
+    if (msg.llm_model) settings.modelConfig.llm_model = msg.llm_model
+    if (msg.llm_base_url) settings.modelConfig.llm_base_url = msg.llm_base_url
+    if (msg.tts_model) settings.modelConfig.tts_model = msg.tts_model
+  }
 })
 
 ws.on('asr_partial', (msg) => {
@@ -144,6 +160,7 @@ ws.on('llm_done', () => {
 
 ws.on('tts_start', (msg) => {
   player.setSampleRate(msg.sample_rate || 24000)
+  player.startSegment()
 })
 
 ws.on('tts_audio', (pcm) => {
@@ -151,10 +168,11 @@ ws.on('tts_audio', (pcm) => {
 })
 
 ws.on('tts_end', () => {
-  // TTS 播放结束
+  player.endSegment()
 })
 
 ws.on('emotion', (msg) => {
+  console.log(`[情感] 好感度: ${msg.affection}, 信任度: ${msg.trust}`)
   affection.value = msg.affection
   trust.value = msg.trust
 })
@@ -165,7 +183,6 @@ ws.on('error', (msg) => {
 })
 
 // ── 连接状态 ──────────────────────────────────────────────
-import { watch } from 'vue'
 watch(() => ws.connected.value, (val) => {
   wsConnected.value = val
 })
@@ -220,11 +237,19 @@ function openSettings() {
   settingsVisible.value = true
 }
 
-async function loadVoices() {
+async function loadVoices(model = '') {
   try {
-    const resp = await fetch('/api/voices')
+    const modelParam = model || settings.modelConfig.tts_model
+    const resp = await fetch(`/api/voices?model=${encodeURIComponent(modelParam)}`)
     if (resp.ok) {
-      voices.value = await resp.json()
+      const list = await resp.json()
+      voices.value = list
+      // 当前音色不在列表中时，自动选择第一个可用音色
+      const currentVoice = settings.voice.value
+      if (list.length > 0 && !list.some(v => v.value === currentVoice)) {
+        settings.voice.value = list[0].value
+        syncConfig()
+      }
     }
   } catch (e) {
     console.error('加载音色列表失败', e)
@@ -259,6 +284,11 @@ function handleMicEnabledUpdate(val) {
 function handleModelConfigUpdate({ key, value }) {
   settings.modelConfig[key] = value
   syncConfig()
+
+  // TTS 模型变更时，重新加载音色列表
+  if (key === 'tts_model') {
+    loadVoices(value)
+  }
 }
 
 function syncConfig() {
@@ -275,11 +305,6 @@ onMounted(async () => {
   if (settings.selectedDeviceId.value) {
     mic.selectedDeviceId.value = settings.selectedDeviceId.value
   }
-
-  // 同步初始配置
-  setTimeout(() => {
-    syncConfig()
-  }, 1000)
 })
 </script>
 

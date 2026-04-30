@@ -2,47 +2,7 @@
   <div class="character-panel">
     <div class="character-avatar" :class="statusClass">
       <div class="avatar-circle">
-        <svg viewBox="0 0 120 120" class="avatar-svg">
-          <!-- Simple anime-style face SVG -->
-          <defs>
-            <radialGradient id="hairGrad" cx="50%" cy="30%">
-              <stop offset="0%" stop-color="#6b4c8a"/>
-              <stop offset="100%" stop-color="#3a2050"/>
-            </radialGradient>
-            <radialGradient id="skinGrad" cx="50%" cy="50%">
-              <stop offset="0%" stop-color="#ffe4c4"/>
-              <stop offset="100%" stop-color="#f5c6a0"/>
-            </radialGradient>
-          </defs>
-          <!-- Hair back -->
-          <ellipse cx="60" cy="30" rx="44" ry="40" fill="url(#hairGrad)"/>
-          <!-- Face -->
-          <ellipse cx="60" cy="55" rx="32" ry="35" fill="url(#skinGrad)"/>
-          <!-- Hair bangs -->
-          <path d="M28 35 Q60 10 92 35 Q88 50 85 42 Q75 30 60 28 Q45 30 35 42 Q32 50 28 35Z" fill="url(#hairGrad)"/>
-          <!-- Side hair -->
-          <path d="M28 35 Q25 60 30 85 Q32 90 36 85 Q34 60 32 40Z" fill="url(#hairGrad)"/>
-          <path d="M92 35 Q95 60 90 85 Q88 90 84 85 Q86 60 88 40Z" fill="url(#hairGrad)"/>
-          <!-- Eyes -->
-          <ellipse cx="50" cy="52" rx="7" ry="8" fill="white"/>
-          <ellipse cx="70" cy="52" rx="7" ry="8" fill="white"/>
-          <ellipse cx="51" cy="53" rx="4.5" ry="5.5" fill="#5a3a7a"/>
-          <ellipse cx="71" cy="53" rx="4.5" ry="5.5" fill="#5a3a7a"/>
-          <circle cx="52.5" cy="51" r="1.8" fill="white"/>
-          <circle cx="72.5" cy="51" r="1.8" fill="white"/>
-          <!-- Eyebrows -->
-          <path d="M42 44 Q50 41 57 44" fill="none" stroke="#4a3060" stroke-width="1.5" stroke-linecap="round"/>
-          <path d="M63 44 Q70 41 78 44" fill="none" stroke="#4a3060" stroke-width="1.5" stroke-linecap="round"/>
-          <!-- Blush -->
-          <ellipse cx="43" cy="60" rx="6" ry="3.5" fill="#ffb3b3" opacity="0.35"/>
-          <ellipse cx="77" cy="60" rx="6" ry="3.5" fill="#ffb3b3" opacity="0.35"/>
-          <!-- Nose -->
-          <path d="M58 57 L60 61 L62 57" fill="none" stroke="#d4a882" stroke-width="1"/>
-          <!-- Mouth -->
-          <path d="M53 67 Q60 72 67 67" fill="none" stroke="#d49090" stroke-width="2" stroke-linecap="round"/>
-          <!-- Hair ornament -->
-          <circle cx="85" cy="38" r="5" fill="#ff6b9d" opacity="0.8"/>
-        </svg>
+        <img src="/img/gpt_img_20260430_210021.png" alt="Yuki" class="avatar-img" />
       </div>
       <div class="status-dot" :class="statusClass" />
     </div>
@@ -129,9 +89,10 @@ const trustPercent = computed(() => Math.min(100, Math.max(0, 50 + props.trust *
   overflow: hidden;
   background: radial-gradient(circle, rgba(200,180,220,0.2) 0%, rgba(100,80,140,0.1) 100%);
 }
-.avatar-svg {
+.avatar-img {
   width: 100%;
   height: 100%;
+  object-fit: cover;
 }
 .status-dot {
   position: absolute;

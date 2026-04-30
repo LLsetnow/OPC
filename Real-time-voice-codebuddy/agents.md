@@ -73,6 +73,20 @@
 
 ---
 
+## Bug 修复记录
+
+### 第一轮修复
+
+| # | 严重度 | 问题 | 文件 | 修复方案 |
+|---|--------|------|------|----------|
+| 1 | 严重 | TTS 同步 `requests` 阻塞事件循环 | `server.py` | `_tts_synthesize` 改用 `loop.run_in_executor(None, next, gen)` 逐块在线程池中获取 |
+| 2 | 严重 | AudioPlayer `clearQueue()` 后 `_processQueue` 竞态继续播放 | `useAudioPlayer.js` | 添加 `_cancelled` 标志，`clearQueue` 设 `true`，`enqueue` 重置，`_processQueue` 循环中检查 |
+| 3 | 重要 | WebSocket URL 硬编码 9902 端口，绕过 Vite 代理 | `useWebSocket.js` | dev 模式用 `location.host`（5173），走 Vite proxy；生产模式直连 9902 |
+| 4 | 重要 | App.vue 中 `watch` 重复 import | `App.vue` | 合并到首行 `import { ref, watch, onMounted } from 'vue'` |
+| 5 | 重要 | SettingsPanel 内容过多无法滚动 | `SettingsPanel.vue` | `panel-body` 添加 `overflow-y: auto; flex: 1` |
+
+---
+
 ## 待完成 / 后续优化
 
 - [ ] 端到端联调测试

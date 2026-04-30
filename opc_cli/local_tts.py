@@ -66,21 +66,26 @@ SUPPORTED_LANGUAGES = [
 
 # ── 模型加载 ──────────────────────────────────────────────────────
 
+def is_model_available(mode: str) -> bool:
+    """检查指定模式的本地模型文件是否存在"""
+    model_path = MODEL_PATHS.get(mode)
+    return bool(model_path and model_path.exists() and TOKENIZER_PATH.exists())
+
+
 def load_model(mode: str, device: str = "cuda:0", attn: str = "sdpa"):
-    """加载 Qwen3-TTS 模型"""
+    """加载 Qwen3-TTS 模型。模型文件不存在时抛出 FileNotFoundError。"""
     import torch
     from qwen_tts import Qwen3TTSModel
 
     model_path = MODEL_PATHS.get(mode)
     if not model_path or not model_path.exists():
-        print(f"错误: 模型路径不存在: {model_path}")
         available = [p.name for p in MODELS_DIR.iterdir() if p.is_dir()] if MODELS_DIR.exists() else []
-        print(f"可用模型: {', '.join(available) if available else '无'}")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"模型路径不存在: {model_path}，可用模型: {', '.join(available) if available else '无'}"
+        )
 
     if not TOKENIZER_PATH.exists():
-        print(f"错误: Tokenizer 不存在: {TOKENIZER_PATH}")
-        sys.exit(1)
+        raise FileNotFoundError(f"Tokenizer 不存在: {TOKENIZER_PATH}")
 
     print(f"加载模型: {model_path.name}")
     print(f"设备: {device}, 精度: bfloat16, 注意力: {attn}")
@@ -231,3 +236,67 @@ def generate_voice_clone(
 def list_speakers() -> dict:
     """返回预设音色字典"""
     return dict(PRESET_SPEAKERS)
+
+
+# ── 文本分块（用于流式 TTS） ──────────────────────────────────────
+
+import re
+
+def split_text_to_chunks(text: str, max_chars: int = 30) -> list[str]:
+    """将文本拆分为适合流式 TTS 的短句块。
+
+    按标点层级逐步拆分：强标点（句号等）→ 逗号/顿号 → 空格。
+    每个分隔符处都独立拆分，以加速流式首包响应。
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    # ── 第一步：按强标点拆分为句子 ──
+    strong_parts = re.split(r'([。！？；\n.!?;])', text)
+    sentences = []
+    buf = ""
+    for i in range(0, len(strong_parts), 2):
+        sentence = strong_parts[i]
+        delimiter = strong_parts[i + 1] if i + 1 < len(strong_parts) else ""
+        buf += sentence + delimiter
+        if delimiter or (i + 2 >= len(strong_parts)):
+            if buf.strip():
+                sentences.append(buf.strip())
+            buf = ""
+
+    if not sentences:
+        return [text]
+
+    # ── 第二步：按逗号/顿号拆分（每个逗号处独立拆分） ──
+    comma_parts = []
+    for s in sentences:
+        if '，' not in s and '、' not in s and ',' not in s:
+            comma_parts.append(s)
+            continue
+        parts = re.split(r'([，、,])', s)
+        for i in range(0, len(parts), 2):
+            seg = parts[i]
+            sep = parts[i + 1] if i + 1 < len(parts) else ""
+            chunk = (seg + sep).strip()
+            if chunk:
+                comma_parts.append(chunk)
+
+    if not comma_parts:
+        return [text]
+
+    # ── 第三步：按空格拆分（每个空格处独立拆分） ──
+    fine_parts = []
+    for s in comma_parts:
+        if ' ' not in s and '\t' not in s:
+            fine_parts.append(s)
+            continue
+        space_parts = re.split(r'\s+', s)
+        for seg in space_parts:
+            if seg.strip():
+                fine_parts.append(seg.strip())
+
+    if not fine_parts:
+        return [text]
+
+    return fine_parts

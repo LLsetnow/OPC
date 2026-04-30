@@ -84,6 +84,7 @@ async def generate_llm_stream(
         "messages": messages,
         "max_tokens": 8192,
         "stream": True,
+        "thinking": {"type": "disabled"},
     }
 
     full_text = ""
@@ -136,13 +137,78 @@ async def generate_llm_stream(
 
 # ── 文本分块工具 ─────────────────────────────────────────────────────
 
-def should_trigger_tts(text_buffer: str, min_chars: int = 30) -> bool:
-    """判断积累的文本是否应该触发一次 TTS 分块"""
-    if len(text_buffer) >= min_chars:
+def should_trigger_tts(text_buffer: str, min_chars: int = 15) -> bool:
+    """判断积累的文本是否应该触发一次 TTS 分块。
+
+    触发条件（按优先级）：
+    1. 遇到强句边界（。！？）
+    2. 积累 ≥20 字且包含空格（短语边界）
+    3. 积累 ≥60 字（兜底，避免长时间无输出）
+    """
+    # 忽略括号内的动作描述
+    clean = re.sub(r'[（\(][^）\)]*[）\)]', '', text_buffer)
+    clean = re.sub(r'<[^>]*>', '', clean)
+
+    if len(clean) < min_chars:
+        return False
+
+    if re.search(r'[。！？]', clean):
         return True
-    if re.search(r'[，。！？、\n]', text_buffer[-3:] if len(text_buffer) >= 3 else text_buffer):
+
+    if len(clean) >= 20 and ' ' in clean:
         return True
+
+    if len(clean) >= 60:
+        return True
+
     return False
+
+
+def prepare_tts_text(text_buffer: str) -> tuple[str, str]:
+    """按自然句子边界切割文本，不切断句子。
+
+    返回 (tts_text, remaining_buffer)，其中 tts_text 是本次合成的内容，
+    remaining_buffer 是剩余未切割的文本。
+    """
+    # 忽略括号内的动作描述（但保留在 TTS 合成中去掉）
+    clean = re.sub(r'[（\(][^）\)]*[）\)]', '', text_buffer)
+    clean = re.sub(r'<[^>]*>', '', clean)
+
+    # 找到最后一个强句边界
+    strong_bounds = list(re.finditer(r'[。！？]', clean))
+    if strong_bounds:
+        last = strong_bounds[-1]
+        boundary = last.end()
+        tts_part = clean[:boundary]
+        remain = clean[boundary:].lstrip()
+        return _finalize_tts(tts_part), remain
+
+    # 没有强边界 → 按空格切（保留前面完整的短语，最后一个短语留下）
+    if len(clean) >= 20:
+        space_matches = list(re.finditer(r' ', clean))
+        if space_matches:
+            last = space_matches[-1]
+            boundary = last.start()
+            if boundary > 6:
+                tts_part = clean[:boundary]
+                remain = clean[boundary:].lstrip()
+                return _finalize_tts(tts_part), remain
+
+    # 缓冲 ≥60 字但无自然边界 → 强制切分
+    if len(clean) >= 60:
+        tts_part = clean[:45]
+        remain = clean[45:]
+        return _finalize_tts(tts_part), remain
+
+    # 文本不够长，不切割
+    return "", text_buffer
+
+
+def _finalize_tts(text: str) -> str:
+    """清理文本，替换标点为空格，准备送入 TTS"""
+    text = re.sub(r'[，、,；;：:！!？?。.\n]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 
 def extract_emotion_tags(text: str) -> tuple[str, int, int]:
@@ -166,12 +232,3 @@ def strip_action_tags(text: str) -> str:
     text = re.sub(r'[（\(][^）\)]*[）\)]', '', text)
     text = re.sub(r'<[^>]*>', '', text)
     return text.strip()
-
-
-def prepare_tts_text(text: str) -> str:
-    """将文本预处理为适合 TTS 分块的格式"""
-    text = strip_action_tags(text)
-    # 标点替换为空格
-    text = re.sub(r'[，、,；;：:！!？?。.\n]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text

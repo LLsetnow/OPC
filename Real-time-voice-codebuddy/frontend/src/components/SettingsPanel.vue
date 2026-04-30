@@ -21,7 +21,7 @@
             >模型与密钥</button>
           </div>
 
-          <div class="panel-body">
+          <div class="panel-body" style="overflow-y: auto; flex: 1;">
             <!-- 语音设置 -->
             <div v-show="activeTab === 'voice'" class="tab-content">
               <div class="form-group">

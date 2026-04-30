@@ -2,6 +2,7 @@
 
 import os
 import sys
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,7 @@ from .tts_server import (
     start_server as _start_tts_server,
     stop_server as _stop_tts_server,
     get_server_url as _get_tts_server_url,
+    get_ws_url as _get_tts_ws_url,
     call_server_generate as _call_server_generate,
     call_server_load as _call_server_load,
     call_server_unload as _call_server_unload,
@@ -183,11 +185,13 @@ def tts(
     voice_name: Optional[str] = typer.Option(None, "--voice-name", help="克隆音色名称"),
     list_voices: bool = typer.Option(False, "--list-voices", help="列出系统音色"),
     list_cloned: bool = typer.Option(False, "--list-cloned", help="列出已克隆的音色"),
+    engine: str = typer.Option("glm-tts", "--engine", help="TTS 引擎: glm-tts (智谱) / qwen-tts (阿里云 CosyVoice)"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
     """文字转语音（支持音色克隆）
 
     使用 --list-voices 查看系统音色，--list-cloned 查看克隆音色。
+    使用 --engine qwen-tts 切换到阿里云 CosyVoice 引擎。
     """
     load_env(env_file)
     api_key, base_url = get_api_config()
@@ -216,6 +220,9 @@ def tts(
         raise typer.Exit(1)
 
     selected_voice = voice
+    # qwen-tts 引擎默认音色不是 tongtong
+    if engine == "qwen-tts" and voice == "tongtong":
+        selected_voice = "longxiaochun_v2"
 
     if clone:
         if not ref_audio:
@@ -263,7 +270,165 @@ def tts(
         volume=volume,
         response_format=format,
         watermark=watermark,
+        engine=engine,
     )
+
+
+# ── 音频播放 ──────────────────────────────────────────────────────
+
+def _play_audio(filepath: str):
+    """播放 WAV 文件。优先 sounddevice，否则用系统/Windows 播放器。"""
+
+    def _try_windows_player(path: str) -> bool:
+        """WSL 环境下用 Windows 播放器打开文件。"""
+        import subprocess
+        try:
+            if path.startswith("/mnt/"):
+                win_path = subprocess.check_output(
+                    ["wslpath", "-w", path], text=True
+                ).strip()
+            else:
+                win_path = path
+            subprocess.Popen(["cmd.exe", "/c", "start", "", win_path])
+            console.print(f"[cyan]已用 Windows 播放器打开[/cyan]")
+            return True
+        except Exception:
+            return False
+
+    def _is_wsl() -> bool:
+        """检测是否运行在 WSL 中。"""
+        try:
+            with open("/proc/version", "r") as f:
+                return "microsoft" in f.read().lower()
+        except Exception:
+            return False
+
+    # 1. 优先 sounddevice（需要 PortAudio + 音频设备）
+    try:
+        import sounddevice as sd
+        import soundfile as sf
+        data, sr = sf.read(filepath, dtype='float32')
+        console.print(f"[cyan]播放中...[/cyan] ({len(data)/sr:.1f}s)")
+        sd.play(data, samplerate=sr, blocking=True)
+        console.print("[dim]播放结束[/dim]")
+        return
+    except (ImportError, OSError) as e:
+        if "PortAudio" in str(e):
+            console.print("[dim]PortAudio 未安装，跳过 sounddevice[/dim]")
+
+    # 2. WSL 环境 → 直接走 Windows 播放器
+    if _is_wsl():
+        if _try_windows_player(filepath):
+            return
+        console.print(f"[yellow]无法调用 Windows 播放器[/yellow]")
+
+    # 3. 非 WSL 的 Linux / macOS
+    import subprocess
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["afplay", filepath])
+        else:
+            subprocess.Popen(["aplay", filepath])
+        console.print(f"[cyan]已用系统播放器打开[/cyan]")
+    except FileNotFoundError:
+        console.print(f"[yellow]无可用的播放器，请手动播放:[/yellow] {filepath}")
+
+
+# ── WebSocket 流式 TTS 客户端 ─────────────────────────────────────
+
+def _stream_generate(ws_url: str, params: dict, output_path: str, play: bool = False):
+    """通过 WebSocket 流式生成 TTS 音频，边生成边写入文件，可选实时播放。"""
+    import asyncio
+    import numpy as np
+    import soundfile as sf
+
+    # 实时播放用的 sounddevice（按需导入）
+    sd = None
+    if play:
+        try:
+            import sounddevice as _sd
+            sd = _sd
+        except ImportError:
+            console.print("[yellow]sounddevice 未安装，无法实时播放（pip install sounddevice）[/yellow]")
+            console.print("[yellow]仅保存到文件[/yellow]")
+
+    async def _run():
+        import websockets
+
+        url = f"{ws_url}/ws/generate"
+        all_pcm = []
+        sample_rate = None
+        chunk_count = 0
+
+        async with websockets.connect(url) as ws:
+            await ws.send(json.dumps(params))
+
+            while True:
+                try:
+                    message = await ws.recv()
+                except websockets.exceptions.ConnectionClosed:
+                    break
+
+                if isinstance(message, bytes):
+                    # PCM 音频数据
+                    pcm = np.frombuffer(message, dtype=np.float32)
+                    all_pcm.append(pcm)
+                    chunk_count += 1
+                    console.print(f"  [dim]收到音频块 #{chunk_count} ({len(pcm)} 采样点)[/dim]")
+
+                    # 实时播放该块
+                    if sd and sample_rate:
+                        sd.play(pcm, samplerate=sample_rate, blocking=False)
+                        sd.wait()  # 等播放完再接收下一块（避免重叠）
+                else:
+                    # JSON 控制消息
+                    data = json.loads(message)
+                    msg_type = data.get("type", "")
+
+                    if msg_type == "stream_info":
+                        sample_rate = data.get("sample_rate", 24000)
+                        console.print(f"  [dim]采样率: {sample_rate}Hz[/dim]")
+
+                    elif msg_type == "chunk_start":
+                        idx = data.get("index", 0)
+                        chunk_text = data.get("text", "")
+                        console.print(f"  [cyan]生成块 #{idx}: {chunk_text[:30]}...[/cyan]")
+
+                    elif msg_type == "chunk_end":
+                        idx = data.get("index", 0)
+                        dur = data.get("duration", 0)
+                        gt = data.get("gen_time", 0)
+                        console.print(f"  [green]块 #{idx} 完成[/green] "
+                                      f"(音频: {dur:.1f}s, 生成: {gt:.1f}s)")
+
+                    elif msg_type == "stream_end":
+                        total_dur = data.get("total_duration", 0)
+                        total_gen = data.get("total_gen_time", 0)
+                        rtf = data.get("rtf", 0)
+                        console.print(
+                            f"[green]流式生成完成![/green] "
+                            f"共 {data.get('total_chunks', 0)} 块, "
+                            f"音频: {total_dur:.1f}s, 生成: {total_gen:.1f}s, RTF: {rtf:.2f}"
+                        )
+                        break
+
+                    elif msg_type == "error":
+                        console.print(f"[red]服务端错误: {data.get('error', '')}[/red]")
+                        break
+
+        # 合并所有 PCM 数据并写入 WAV
+        if all_pcm and sample_rate:
+            audio = np.concatenate(all_pcm)
+            out_dir = os.path.dirname(output_path)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            sf.write(output_path, audio, sample_rate)
+            console.print(f"[green]已保存: {output_path}[/green] "
+                          f"({len(audio)/sample_rate:.1f}s, {os.path.getsize(output_path)/1024:.1f}KB)")
+        else:
+            console.print("[yellow]未收到音频数据[/yellow]")
+
+    asyncio.run(_run())
 
 
 # ── local-tts 子命令 ─────────────────────────────────────────────
@@ -282,8 +447,11 @@ def local_tts(
     attn: str = typer.Option("sdpa", "--attn", help="注意力实现: sdpa/flash_attention_2/eager"),
     list_speakers_flag: bool = typer.Option(False, "--list-speakers", help="列出预设音色"),
     no_server: bool = typer.Option(False, "--no-server", help="不使用常驻服务，直接加载模型"),
+    stream: bool = typer.Option(False, "--stream", help="使用 WebSocket 流式生成"),
+    play: bool = typer.Option(False, "--play", help="流式生成时实时播放音频（需 sounddevice）"),
     # 服务管理选项
     serve: bool = typer.Option(False, "--serve", help="启动 TTS 常驻服务"),
+    no_load: bool = typer.Option(False, "--no-load", help="启动服务时不加载本地模型（仅云引擎可用）"),
     stop: bool = typer.Option(False, "--stop", help="停止 TTS 常驻服务"),
     status: bool = typer.Option(False, "--status", help="查看 TTS 服务状态"),
     unload: bool = typer.Option(False, "--unload", help="释放常驻服务中的模型缓存（服务保持运行）"),
@@ -317,7 +485,7 @@ def local_tts(
         return
 
     if serve:
-        _start_tts_server(mode=mode, device=device, attn=attn, port=port)
+        _start_tts_server(mode=mode, device=device, attn=attn, port=port, no_load=no_load)
         return
 
     if unload:
@@ -402,6 +570,62 @@ def local_tts(
     console.print(f"[bold]=== Qwen3-TTS 本地语音合成 ===[/bold]")
     console.print(f"模式: {mode} | 音色: {speaker} | 语言: {language}")
 
+    # ── 流式生成模式 ──
+    if stream:
+        ws_url = _get_tts_ws_url()
+        if not ws_url:
+            console.print("[red]流式模式需要常驻服务支持，请先启动: opc local-tts --serve[/red]")
+            raise typer.Exit(1)
+
+        # --play 时打开浏览器播放器
+        if play:
+            from urllib.parse import urlencode
+            server_url = _get_tts_server_url()
+            player_url = server_url + "/player?" + urlencode({
+                "text": text,
+                "mode": mode,
+                "speaker": speaker,
+                "language": language,
+                "instruct": instruct,
+                "auto": "1",
+            })
+            console.print(f"[cyan]→ 打开流式播放器: {player_url}[/cyan]")
+            import subprocess
+            try:
+                # WSL 中用 Windows 浏览器打开
+                with open("/proc/version", "r") as _f:
+                    _is_wsl = "microsoft" in _f.read().lower()
+                if _is_wsl:
+                    subprocess.Popen(["cmd.exe", "/c", "start", "", player_url])
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", player_url])
+                else:
+                    subprocess.Popen(["xdg-open", player_url])
+                console.print("[green]浏览器已打开，音频将通过浏览器播放（支持蓝牙耳机）[/green]")
+            except Exception as e:
+                console.print(f"[yellow]无法自动打开浏览器: {e}[/yellow]")
+                console.print(f"[yellow]请手动访问: {player_url}[/yellow]")
+            return
+
+        # 非播放模式：接收 PCM 并保存到文件
+        console.print(f"[cyan]→ WebSocket 流式模式 {ws_url}[/cyan]")
+        try:
+            _stream_generate(ws_url, {
+                "type": "generate",
+                "text": text,
+                "mode": mode,
+                "speaker": speaker,
+                "language": language,
+                "instruct": instruct,
+                "ref_audio": ref_audio or "",
+                "ref_text": ref_text or "",
+                "attn": attn,
+            }, output, play=False)
+        except Exception as e:
+            console.print(f"[red]流式生成失败: {e}[/red]")
+            raise typer.Exit(1)
+        return
+
     if use_server:
         # 通过常驻服务生成（模型已加载，秒出结果）
         console.print(f"[cyan]→ 使用常驻服务 {server_url}[/cyan]")
@@ -444,7 +668,11 @@ def local_tts(
     if not use_server:
         # 直接加载模型（慢，约1分钟）
         console.print("[dim]  直接加载模式（提示：使用 opc local-tts --serve 启动常驻服务可跳过模型加载）[/dim]")
-        model = _local_load_model(mode, device=device, attn=attn)
+        try:
+            model = _local_load_model(mode, device=device, attn=attn)
+        except FileNotFoundError as e:
+            console.print(f"[red]错误: {e}[/red]")
+            raise typer.Exit(1)
 
         # 生成
         if mode == "custom":
@@ -473,6 +701,10 @@ def local_tts(
 
         total_elapsed = time.time() - total_t0
         console.print(f"[green]完成![/green] 输出: {output} (总耗时: {total_elapsed:.1f}s)")
+
+    # 生成后播放
+    if play and os.path.exists(output):
+        _play_audio(output)
 
 
 # ── img 子命令 ────────────────────────────────────────────────────

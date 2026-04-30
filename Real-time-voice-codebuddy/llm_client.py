@@ -130,10 +130,18 @@ async def generate_llm_stream(
 
 # ── 文本分块工具 ─────────────────────────────────────────────────────
 
-def should_trigger_tts(text_buffer: str, min_chars: int = 30) -> bool:
-    if len(text_buffer) >= min_chars:
+def should_trigger_tts(text_buffer: str) -> bool:
+    """检查是否应该触发 TTS 分块：空格或标点作为自然断点"""
+    if not text_buffer:
+        return False
+    # 有空格作为分隔（括号/标签闭合后空格是自然断句）
+    if ' ' in text_buffer:
         return True
-    if re.search(r'[，。！？、\n]', text_buffer[-3:] if len(text_buffer) >= 3 else text_buffer):
+    # 末尾有中英文标点或闭合括号/标签
+    if text_buffer[-1] in '，。！？、；：,.!?;:）)\n>':
+        return True
+    # 足够长且无未闭合括号时强制触发（防止超长无标点文本卡住）
+    if len(text_buffer) >= 50:
         return True
     return False
 
@@ -142,11 +150,11 @@ def extract_emotion_tags(text: str) -> tuple[str, int, int]:
     affection = 0
     trust = 0
     clean = text
-    m = re.search(r'<好感变化:\s*([+-]?\d+)>', text)
+    m = re.search(r'<好感变化[：:]\s*([+-]?\d+)>', text)
     if m:
         affection = int(m.group(1))
         clean = clean.replace(m.group(0), "")
-    m = re.search(r'<信任变化:\s*([+-]?\d+)>', clean)
+    m = re.search(r'<信任变化[：:]\s*([+-]?\d+)>', clean)
     if m:
         trust = int(m.group(1))
         clean = clean.replace(m.group(0), "")
@@ -164,3 +172,35 @@ def prepare_tts_text(text: str) -> str:
     text = re.sub(r'[，、,；;：:！!？?。.\n]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
+
+def extract_tts_chunks(text: str, max_chunk_len: int = 15) -> list[str]:
+    """将文本分割为 TTS 块：动作标签替换为空格（保留分割点），按空格分割，不切断连续话语"""
+    # 移除尖括号标签（如情感标签，已在前面提取）
+    text = re.sub(r'<[^>]*>', '', text)
+    # 动作标签替换为空格，保留分割点而非删除
+    text = re.sub(r'[（\(][^）\)]*[）\)]', ' ', text)
+    # 标点替换为空格
+    text = re.sub(r'[，、,；;：:！!？?。.\n]', ' ', text)
+    # 按空格分割
+    chunks = re.split(r'\s+', text)
+    chunks = [c.strip() for c in chunks if c.strip()]
+    # 对超长块按语义断点拆分
+    result = []
+    for ch in chunks:
+        if len(ch) <= max_chunk_len:
+            result.append(ch)
+        else:
+            # 按语义断点拆分：在 了/的/呢/吗/吧/啊/哦/呀/啦 等语气词后拆分
+            sub_chunks = re.split(r'(?<=[了呢吗吧啊哦呀啦着过])', ch)
+            current = ""
+            for sub in sub_chunks:
+                if len(current) + len(sub) <= max_chunk_len:
+                    current += sub
+                else:
+                    if current:
+                        result.append(current)
+                    current = sub
+            if current:
+                result.append(current)
+    return result

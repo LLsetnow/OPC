@@ -197,11 +197,16 @@ function setupWS() {
 // ── Voice input ──
 
 async function startVoice() {
+  // 已在录音中 → 关闭麦克风（toggle off）
+  if (isRecording.value) {
+    stopVoice()
+    return
+  }
+
   if (appState.value === 'thinking' || appState.value === 'speaking') {
-    // Interrupt
+    // 打断当前回复，但保持麦克风开启
     send({ type: 'interrupt' })
     clearAudio()
-    // Mark current AI message as interrupted
     const lastAi = [...messages.value].reverse().find(m => m.role === 'ai')
     if (lastAi && !lastAi.interrupted) {
       lastAi.interrupted = true
@@ -213,7 +218,6 @@ async function startVoice() {
 
   try {
     await startMic(settings.deviceId)
-    appState.value = 'listening'
     currentAsrText.value = ''
     send({ type: 'start_voice', sample_rate: 16000 })
   } catch (err) {
@@ -224,12 +228,6 @@ async function startVoice() {
 function stopVoice() {
   stopMic()
   send({ type: 'stop_voice' })
-  if (currentAsrText.value) {
-    // Use the partial result as final if user manually stops
-  }
-  if (appState.value === 'listening') {
-    appState.value = 'idle'
-  }
 }
 
 // ── Text input ──
