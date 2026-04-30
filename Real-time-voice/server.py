@@ -10,6 +10,7 @@ from pathlib import Path
 
 import websockets
 from websockets.asyncio.server import serve
+from websockets.http11 import Headers, Response
 
 from logger import setup_logger, get_logger, setup_error_capture
 
@@ -314,7 +315,7 @@ async def _http_handler(connection, request):
     websockets 16.0: process_request(connection, request)
     - connection: ServerConnection
     - request: Request with .path, .headers
-    返回 (status, headers, body) 元组或 None
+    返回 Response 对象或 None（放行到 WebSocket handler）
     """
     from tts_client import list_voices
 
@@ -324,11 +325,10 @@ async def _http_handler(connection, request):
         api_key = os.environ.get("QWEN_TTS_API_KEY", "")
         voices = list_voices(api_key)
         body = json.dumps(voices, ensure_ascii=False).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
-        }
-        return 200, headers, body
+        h = Headers()
+        h["Content-Type"] = "application/json; charset=utf-8"
+        h["Access-Control-Allow-Origin"] = "*"
+        return Response(200, "OK", h, body=body)
 
     # 静态文件服务（Vue build 产物）
     static_dir = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -342,15 +342,21 @@ async def _http_handler(connection, request):
     if file_path.exists() and file_path.is_file():
         content_type = _guess_mime(file_path)
         body = file_path.read_bytes()
-        return 200, {"Content-Type": content_type}, body
+        h = Headers()
+        h["Content-Type"] = content_type
+        return Response(200, "OK", h, body=body)
 
     # SPA fallback
     index_path = static_dir / "index.html"
     if index_path.exists():
         body = index_path.read_bytes()
-        return 200, {"Content-Type": "text/html"}, body
+        h = Headers()
+        h["Content-Type"] = "text/html"
+        return Response(200, "OK", h, body=body)
 
-    return 404, {"Content-Type": "text/plain"}, b"Not Found"
+    h = Headers()
+    h["Content-Type"] = "text/plain"
+    return Response(404, "Not Found", h, body=b"Not Found")
 
 
 def _guess_mime(path: Path) -> str:
