@@ -61,6 +61,7 @@
 
 - [x] websockets 16.0 `process_request` 签名兼容：`_http_handler(connection, request)` 替代旧的 `(path, request_headers)`
 - [x] `full_text` 变量初始化，避免 `async for` 未执行时未定义
+- [x] 终端报错写入日志：`sys.excepthook` + asyncio 异常处理器 + `sys.stderr` tee 三路捕获
 
 ## 启动方式
 
