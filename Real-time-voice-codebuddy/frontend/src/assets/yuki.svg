@@ -1,0 +1,23 @@
+<svg viewBox="0 0 200 280" xmlns="http://www.w3.org/2000/svg">
+  <!-- 头发 -->
+  <ellipse cx="100" cy="90" rx="65" ry="70" fill="#2a1a4e"/>
+  <!-- 脸 -->
+  <ellipse cx="100" cy="100" rx="48" ry="52" fill="#fde8d8"/>
+  <!-- 眼睛 -->
+  <ellipse cx="82" cy="95" rx="8" ry="10" fill="#6a4fb8"/>
+  <ellipse cx="118" cy="95" rx="8" ry="10" fill="#6a4fb8"/>
+  <!-- 高光 -->
+  <circle cx="85" cy="91" r="3" fill="white"/>
+  <circle cx="121" cy="91" r="3" fill="white"/>
+  <!-- 嘴巴 -->
+  <path d="M92 115 Q100 122 108 115" stroke="#e87a90" stroke-width="2" fill="none"/>
+  <!-- 腮红 -->
+  <ellipse cx="72" cy="110" rx="10" ry="6" fill="rgba(255,150,170,0.3)"/>
+  <ellipse cx="128" cy="110" rx="10" ry="6" fill="rgba(255,150,170,0.3)"/>
+  <!-- 身体 -->
+  <path d="M60 150 Q100 140 140 150 L150 280 L50 280 Z" fill="#4a3a8a"/>
+  <path d="M80 150 Q100 145 120 150 L115 200 L85 200 Z" fill="#fde8d8"/>
+  <!-- 头发装饰 -->
+  <circle cx="130" cy="60" r="6" fill="#ff7eb3"/>
+  <path d="M60 75 Q55 50 70 40" stroke="#2a1a4e" stroke-width="8" fill="none"/>
+</svg>
