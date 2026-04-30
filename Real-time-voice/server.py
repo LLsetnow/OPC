@@ -11,7 +11,7 @@ from pathlib import Path
 import websockets
 from websockets.asyncio.server import serve
 
-from logger import setup_logger, get_logger
+from logger import setup_logger, get_logger, setup_error_capture
 
 # 加载 .env（项目根目录）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -401,6 +401,7 @@ async def _ws_handler(websocket):
 
 def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
     logger = setup_logger("voice-chat")
+    setup_error_capture(logger)
     logger.info(f"=== Real-time-voice 服务启动 ===")
     logger.info(f"HTTP + WS 地址: http://{host}:{port}")
     logger.info(f"API: GET /api/voices")
