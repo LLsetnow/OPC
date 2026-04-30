@@ -321,13 +321,20 @@ async def _http_handler(connection, request):
 
     path = request.path
 
+    # 分离路径和查询字符串
+    if "?" in path:
+        path, query_string = path.split("?", 1)
+    else:
+        query_string = ""
+
     # WebSocket 升级请求 → 放行，不拦截
     if path == "/ws/voice-chat":
         return None
 
     if path == "/api/voices":
         api_key = os.environ.get("QWEN_TTS_API_KEY", "")
-        voices = list_voices(api_key)
+        model = _parse_qs_param(query_string, "model") or os.environ.get("QWEN_TTS_MODEL", "")
+        voices = list_voices(api_key, model)
         body = json.dumps(voices, ensure_ascii=False).encode("utf-8")
         h = Headers()
         h["Content-Type"] = "application/json; charset=utf-8"
@@ -361,6 +368,18 @@ async def _http_handler(connection, request):
     h = Headers()
     h["Content-Type"] = "text/plain"
     return Response(404, "Not Found", h, body=b"Not Found")
+
+
+def _parse_qs_param(query_string: str, key: str) -> str:
+    """从原始 query_string 中提取指定参数值"""
+    if not query_string:
+        return ""
+    for part in query_string.split("&"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k == key:
+                return v
+    return ""
 
 
 def _guess_mime(path: Path) -> str:

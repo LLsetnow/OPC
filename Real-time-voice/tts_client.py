@@ -3,6 +3,7 @@
 import base64
 import io
 import json
+import os
 import struct
 import time
 
@@ -106,26 +107,55 @@ QWEN_TTS_VOICES_BY_MODEL = {
     "cosyvoice-v2": QWEN_TTS_VOICES_V2,
     "cosyvoice-v3-flash": QWEN_TTS_VOICES_V3,
     "cosyvoice-v3-plus": QWEN_TTS_VOICES_V3,
+    # v3.5 仅支持复刻/克隆音色，无系统音色
     "cosyvoice-v3.5-flash": {},
     "cosyvoice-v3.5-plus": {},
 }
 
+# ── 从 .env 读取的克隆音色 ───────────────────────────────────────
+
+def _get_env_clone_voices() -> list[dict]:
+    """从 .env 中读取 VOICE_ID1, VOICE_ID2 ... 等克隆音色"""
+    voices = []
+    seen = set()
+    for i in range(1, 6):
+        raw = os.environ.get(f"VOICE_ID{i}", "").strip()
+        if not raw:
+            continue
+        vid = raw.split("#")[0].strip()
+        if vid and vid not in seen:
+            seen.add(vid)
+            label = vid[:24] + "..." if len(vid) > 27 else vid
+            voices.append({"value": vid, "label": label, "type": "clone"})
+    return voices
+
 # ── 音色查询 ──────────────────────────────────────────────────────
 
 def list_voices(api_key: str, model: str = "") -> list[dict]:
-    """获取可用音色列表（系统音色 + API 查询的复刻音色）"""
+    """获取可用音色列表。
+
+    规则：
+    - cosyvoice-v2: 系统 v2 音色 + 复刻音色
+    - cosyvoice-v3-*: 系统 v3 音色 + 复刻音色
+    - cosyvoice-v3.5-*: 仅复刻/克隆音色（无系统音色）
+    """
     voices = []
 
-    # 系统音色
+    # 系统音色（v3.5 模型无系统音色）
     sys_voices = QWEN_TTS_VOICES_BY_MODEL.get(model, {})
-    if not sys_voices:
-        sys_voices = {**QWEN_TTS_VOICES_V2, **QWEN_TTS_VOICES_V3}
     for vid, label in sys_voices.items():
         voices.append({"value": vid, "label": label, "type": "system"})
 
-    # API 查询复刻音色
-    clone_voices = _query_clone_from_api(api_key)
-    voices.extend(clone_voices)
+    # .env 克隆音色（优先显示，所有模型通用）
+    env_clones = _get_env_clone_voices()
+    voices.extend(env_clones)
+
+    # API 查询复刻音色（去重）
+    api_clones = _query_clone_from_api(api_key)
+    existing = {v["value"] for v in voices}
+    for v in api_clones:
+        if v["value"] not in existing:
+            voices.append(v)
 
     return voices
 

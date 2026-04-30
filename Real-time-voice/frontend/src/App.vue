@@ -255,9 +255,27 @@ function handleTextInput(text) {
 
 // ── Settings ──
 
+async function fetchVoices(model) {
+  try {
+    const modelParam = model || settings.tts_model
+    const resp = await fetch(`/api/voices?model=${encodeURIComponent(modelParam)}`)
+    if (resp.ok) {
+      voices.value = await resp.json()
+      // 如果当前音色不在列表中，自动选择第一个
+      if (voices.value.length > 0 && !voices.value.find(v => v.value === settings.voice)) {
+        updateSetting('voice', voices.value[0].value)
+        send(getWebSocketConfig())
+      }
+    }
+  } catch {}
+}
+
 function handleModelConfigUpdate({ key, value }) {
   updateSetting(key, value)
   send(getWebSocketConfig())
+  if (key === 'tts_model') {
+    fetchVoices(value)
+  }
 }
 
 // ── Init ──
@@ -277,13 +295,7 @@ onMounted(async () => {
   connect(wsUrl)
   setupWS()
 
-  // Fetch voices
-  try {
-    const resp = await fetch('/api/voices')
-    if (resp.ok) {
-      voices.value = await resp.json()
-    }
-  } catch {}
+  fetchVoices()
 })
 </script>
 
