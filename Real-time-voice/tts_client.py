@@ -1,7 +1,6 @@
 """CosyVoice TTS 流式合成 + 音色查询（独立实现，不复用 tts_server.py）"""
 
 import base64
-import io
 import json
 import os
 import struct
@@ -114,10 +113,41 @@ QWEN_TTS_VOICES_BY_MODEL = {
 
 # ── 从 .env 读取的克隆音色 ───────────────────────────────────────
 
+_ENV_PATH = None
+
+
+def _get_env_path():
+    global _ENV_PATH
+    if _ENV_PATH is None:
+        p = os.environ.get("OPC_ENV_PATH", "")
+        if p:
+            _ENV_PATH = p
+        else:
+            candidate = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+            _ENV_PATH = candidate if os.path.exists(candidate) else None
+    return _ENV_PATH
+
+
 def _get_env_clone_voices() -> list[dict]:
-    """从 .env 中读取 VOICE_ID1, VOICE_ID2 ... 等克隆音色"""
+    """从 .env 中读取 VOICE_ID1, VOICE_ID2 ... 等克隆音色，并提取注释中的昵称"""
     voices = []
     seen = set()
+
+    # 解析 .env 文件获取注释中的音色名称
+    env_names = {}
+    env_path = _get_env_path()
+    if env_path and os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("VOICE_ID") and "=" in line and "#" in line:
+                    _, comment = line.split("#", 1)
+                    comment = comment.strip()
+                    if comment:
+                        key = line.split("=")[0].strip()
+                        env_names[key] = comment
+
     for i in range(1, 6):
         raw = os.environ.get(f"VOICE_ID{i}", "").strip()
         if not raw:
@@ -125,8 +155,8 @@ def _get_env_clone_voices() -> list[dict]:
         vid = raw.split("#")[0].strip()
         if vid and vid not in seen:
             seen.add(vid)
-            label = vid[:24] + "..." if len(vid) > 27 else vid
-            voices.append({"value": vid, "label": label, "type": "clone"})
+            name = env_names.get(f"VOICE_ID{i}", vid[:24] + "..." if len(vid) > 27 else vid)
+            voices.append({"value": vid, "label": f"{name}（v3.5 克隆）", "type": "clone"})
     return voices
 
 # ── 音色查询 ──────────────────────────────────────────────────────
@@ -135,9 +165,9 @@ def list_voices(api_key: str, model: str = "") -> list[dict]:
     """获取可用音色列表。
 
     规则：
-    - cosyvoice-v2: 系统 v2 音色 + 复刻音色
-    - cosyvoice-v3-*: 系统 v3 音色 + 复刻音色
-    - cosyvoice-v3.5-*: 仅复刻/克隆音色（无系统音色）
+    - cosyvoice-v2: 系统 v2 音色
+    - cosyvoice-v3-*: 系统 v3 音色
+    - cosyvoice-v3.5-*: 仅 .env 克隆音色（VOICE_ID1/2...），无系统音色
     """
     voices = []
 
@@ -146,64 +176,11 @@ def list_voices(api_key: str, model: str = "") -> list[dict]:
     for vid, label in sys_voices.items():
         voices.append({"value": vid, "label": label, "type": "system"})
 
-    # .env 克隆音色（优先显示，所有模型通用）
+    # .env 克隆音色（所有模型通用）
     env_clones = _get_env_clone_voices()
     voices.extend(env_clones)
 
-    # API 查询复刻音色（去重）
-    api_clones = _query_clone_from_api(api_key)
-    existing = {v["value"] for v in voices}
-    for v in api_clones:
-        if v["value"] not in existing:
-            voices.append(v)
-
     return voices
-
-
-def _query_clone_from_api(api_key: str) -> list[dict]:
-    """从阿里云百炼 API 查询已创建的复刻/设计音色"""
-    try:
-        url = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        all_voices = []
-        page_index = 0
-        while True:
-            body = {
-                "model": "voice-enrollment",
-                "input": {
-                    "action": "list_voice",
-                    "page_size": 100,
-                    "page_index": page_index,
-                },
-            }
-            resp = requests.post(url, headers=headers, json=body, timeout=30)
-            if resp.status_code != 200:
-                break
-            data = resp.json()
-            voice_list = data.get("output", {}).get("voice_list", [])
-            if not voice_list:
-                break
-            for v in voice_list:
-                vid = v.get("voice_id", "")
-                target = v.get("target_model", "")
-                if v.get("status") != "OK" or not vid:
-                    continue
-                label = f"{vid[:16]}...（{target}）" if len(vid) > 20 else f"{vid}（{target}）"
-                all_voices.append({
-                    "value": vid,
-                    "label": label,
-                    "target_model": target,
-                    "type": "clone",
-                })
-            if len(voice_list) < 100:
-                break
-            page_index += 1
-        return all_voices
-    except Exception:
-        return []
 
 
 # ── 流式 TTS 合成 ──────────────────────────────────────────────────
