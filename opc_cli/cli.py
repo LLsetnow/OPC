@@ -18,6 +18,7 @@ if sys.platform == "win32":
 
 from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
+from .bilimusic import run_bilimusic
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .local_tts import (
     load_model as _local_load_model,
@@ -56,7 +57,7 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + AI日报 + 文生图",
+    help="OPC 工具集：B站视频转写 + B站音乐下载 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + AI日报 + 文生图",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -98,6 +99,37 @@ def bili(
         skip_asr=skip_asr,
         asr_file=asr_file,
         llm_fix=llm_fix,
+    )
+
+
+# ── bilimusic 子命令 ───────────────────────────────────────────────
+
+@app.command("bilimusic")
+def bilimusic(
+    url: str = typer.Argument(..., help="Bilibili 视频链接"),
+    output_dir: str = typer.Option("./output", "-o", "--output-dir", help="输出目录"),
+    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps)"),
+    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 ID3 元数据写入"),
+    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
+):
+    """B站视频音频下载 → 转为 MP3（带 ID3 元数据）
+
+    下载视频最佳音频轨道，转为 MP3 格式，自动写入标题、UP主、封面等 ID3 标签。
+
+    示例:
+
+        opc bilimusic "https://www.bilibili.com/video/BV1xx"
+
+        opc bilimusic "URL" -o ./music --bitrate 320
+
+        opc bilimusic "URL" --no-metadata
+    """
+    run_bilimusic(
+        url=url,
+        output_dir=output_dir,
+        bitrate=bitrate,
+        no_metadata=no_metadata,
+        cookies=cookies,
     )
 
 

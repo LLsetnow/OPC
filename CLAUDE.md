@@ -7,6 +7,7 @@
 | 需求场景 | 命令 | 说明 |
 |---|---|---|
 | B站视频下载/转写/总结 | `opc bili "URL"` | 下载音频 → ASR转写 → 内容总结 |
+| B站视频下載MP3音频 | `opc bilimusic "URL"` | 下载音频 → 转为MP3（含ID3元数据） |
 | 仅下载B站音频 | `opc bili "URL" --audio-only` | 不做ASR转写 |
 | 跳过下载直接转写 | `opc bili --skip-download` | 从output目录查找已有音频 |
 | 跳过下载和ASR直接总结 | `opc bili --skip-download --skip-asr` | 从output目录查找已有字幕 |
@@ -33,7 +34,7 @@
 
 `opc` 安装在 WSL 的虚拟环境中，执行任何 `opc` 命令前**必须**先激活 venv：
 
-- **常规命令**（bili/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news）：使用 `~/qwen3-tts-venv`
+- **常规命令**（bili/bilimusic/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news）：使用 `~/qwen3-tts-venv`
 - **local-tts**（本地Qwen3-TTS）：使用 `~/qwen3-tts-venv`（需要 torch）
 
 ### 命令执行格式
@@ -48,6 +49,9 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 ```bash
 # API检查
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc check-api"
+
+# B站视频下载MP3
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc bilimusic 'https://www.bilibili.com/video/BV1xx'"
 
 # B站视频完整流程
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc bili 'https://www.bilibili.com/video/BV1xx'"
