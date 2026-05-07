@@ -159,7 +159,7 @@ def asr(
         console.print(f"[red]错误: 文件不存在: {audio}[/red]")
         raise typer.Exit(1)
 
-    if audio_path.suffix.lower() not in (".wav", ".mp3", ".m4a", ".webm", ".ogg", ".opus"):
+    if audio_path.suffix.lower() not in (".wav", ".mp3", ".m4a", ".mp4", ".webm", ".ogg", ".opus", ".mov", ".mkv"):
         console.print(f"[red]错误: 不支持的音频格式: {audio_path.suffix}（支持 .wav/.mp3/.m4a/.webm/.ogg/.opus）[/red]")
         raise typer.Exit(1)
 
