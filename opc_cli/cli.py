@@ -76,6 +76,7 @@ def bili(
     audio_file: Optional[str] = typer.Option(None, "--audio-file", help="指定已有音频文件路径"),
     skip_asr: bool = typer.Option(False, "--skip-asr", help="跳过 ASR，使用已有字幕文件生成总结"),
     asr_file: Optional[str] = typer.Option(None, "--asr-file", help="指定已有 ASR JSON 或 SRT 文件路径"),
+    llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
     """B站视频下载 + ASR 转写 + 内容总结
@@ -97,6 +98,7 @@ def bili(
         audio_file=audio_file,
         skip_asr=skip_asr,
         asr_file=asr_file,
+        llm_fix=llm_fix,
     )
 
 
@@ -138,6 +140,8 @@ def asr(
     audio: str = typer.Argument(..., help="输入音频文件路径（.wav/.mp3/.m4a 等）"),
     output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认与输入文件同目录）"),
     no_resegment: bool = typer.Option(False, "--no-resegment", help="禁用自动重断句（保留 ASR 原始切分）"),
+    llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
+    trim: Optional[int] = typer.Option(None, "-t", "--trim", help="只识别音频的前 N 秒（方便测试）"),
 ):
     """语音识别（ASR）：将音频文件转写为 SRT 和 JSON 字幕文件
 
@@ -176,21 +180,21 @@ def asr(
     console.print(f"输出: {out_dir}")
 
     # ASR 转写（asr_transcribe 内部会自动转换格式）
-    asr_result = asr_transcribe(str(audio_path))
+    asr_result = asr_transcribe(str(audio_path), trim_seconds=trim)
 
-    # 自动重断句：按自然语句重新切分
-    if not no_resegment:
-        console.print("[dim]  LLM 智能断句 + 纠错...[/dim]")
-        asr_result = resegment_asr(asr_result)
-
-    # 生成 SRT
-    generate_srt(asr_result, str(srt_path))
-
-    # 生成 JSON
+    # 保存原始 ASR 结果（JSON），不经过重断句处理
     with open(str(json_path), "w", encoding="utf-8") as f:
         import json
         json.dump(asr_result, f, ensure_ascii=False, indent=2)
-    console.print(f"ASR JSON 已保存: {json_path}")
+    console.print(f"ASR JSON 已保存（原始结果）: {json_path}")
+
+    # 自动重断句：按自然语句重新切分
+    if not no_resegment:
+        console.print("[dim]  自动重断句（按逗号逐句切分）...[/dim]")
+        asr_result = resegment_asr(asr_result, llm_fix=llm_fix)
+
+    # 生成 SRT
+    generate_srt(asr_result, str(srt_path))
 
     console.print(f"\n[green]完成![/green]")
     console.print(f"  SRT:  {srt_path}")
