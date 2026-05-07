@@ -194,10 +194,10 @@ def asr_transcribe(audio_path: str, use_words: bool = True) -> dict:
     return _parse_recognition_result(result, use_words=use_words)
 
 
-def llm_fix_asr_text(raw_text: str) -> str:
-    """使用 LLM 修复 ASR 文本中的同音字/近音字和错字错误
+def _llm_resegment_asr_text(raw_text: str) -> list:
+    """使用 LLM 将 ASR 文本切分为短句并纠错。
 
-    只修正错字，不改变断词和文本结构，以保留精确的时间戳映射。
+    返回处理后的句子列表，每句不超过13字，无标点符号。
     """
     from openai import OpenAI
 
@@ -207,59 +207,53 @@ def llm_fix_asr_text(raw_text: str) -> str:
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    prompt = f"""你是一个 ASR（语音识别）文本校对专家。以下是一段语音识别的原始输出，ASR 模型存在同音字/近音字识别错误，需要根据上下文语义纠正。
+    prompt = f"""你是ASR后处理专家。处理以下语音识别文本：
 
-**重要约束**：
-- 只修正同音字、近音字和明显的错字，不要改变断词、语序或文本结构
-- 保留原有的所有标点符号（句号、逗号等），不要增删或移动标点
-- 修正后文本的字符数必须与原文相同（逐字替换，不增不减）
-- 如果某个字不需要修正，保持原样即可
+要求：
+1. 按语义自然断句，每句不超过13字
+2. 修正同音字、近音字和错字
+3. 每句一行输出，句末不要加句号，句中不要任何标点符号
 
-常见同音/近音错误示例：
-- "几干" → "几千"
-- "5干度" → "5千度"
-- "近视温度" → "近似温度"
-- "密的" → "密得"
+直接输出，不要解释。
 
-直接输出修正后的文本，不要添加任何解释。
-
---- 原始 ASR 文本 ---
-
+原始文本：
 {raw_text}"""
 
     response = client.chat.completions.create(
         model=llm_model,
         messages=[
-            {"role": "system", "content": "你是一个 ASR 文本校对专家，只修正同音字/近音字和错字，不改变断词、标点和文本结构。"},
+            {"role": "system",
+             "content": "你是ASR文本后处理专家。按语义将文本切分为短句（≤13字），修正错字，每句一行，无标点。"},
             {"role": "user", "content": prompt},
         ],
         temperature=0.1,
         max_tokens=4096,
     )
 
-    corrected = response.choices[0].message.content
-    if not corrected:
-        print("警告: LLM 修复返回为空，使用原始文本")
-        return raw_text
+    result = response.choices[0].message.content
+    if not result:
+        print("警告: LLM 返回为空，使用原始文本")
+        return [raw_text]
 
-    corrected = corrected.strip()
-    print(f"LLM 文本修复完成: 原始 {len(raw_text)} 字 → 修正 {len(corrected)} 字")
-    return corrected
+    lines = [line.strip() for line in result.strip().split("\n") if line.strip()]
+    print(f"LLM 断句完成: 原始 {len(raw_text)} 字 → {len(lines)} 句")
+    return lines
 
 
-def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
-    """后处理：将 ASR 片段按自然语句重新切分
+def resegment_asr(asr_result: dict) -> dict:
+    """后处理：使用 LLM 将 ASR 片段按语义重新切分并纠错
 
-    优先使用词级时间戳（words）进行精确映射，退回到段落级线性插值。
-    如果使用 LLM 修正了文本，则按总时长比例估算时间。
+    1. 合并 ASR 段落 + 构建词级时间线
+    2. LLM 智能断句（每句≤13字）+ 错字修正 + 去标点
+    3. SequenceMatcher 文本对齐，映射回原始时间戳
     """
     segments = asr_result.get("segments", [])
     if not segments:
         return asr_result
 
-    # 1. 合并所有片段文本，构建词级时间线（比段落级更精确）
+    # ── 1. 合并文本 + 构建词级时间线 ──────────────────────────────
+
     full_text = ""
-    # word_boundaries: [(char_start, char_end, start_sec, end_sec), ...]
     word_boundaries = []
     has_words = False
 
@@ -276,11 +270,8 @@ def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
         words = seg.get("words", [])
         if words:
             has_words = True
-            # 检查词文本拼接是否与段文本一致
             concatenated = "".join(w.get("text", "") for w in words)
-
             if concatenated == text:
-                # 完美匹配：精确词级字符偏移
                 w_offset = 0
                 for w in words:
                     w_text = w.get("text", "")
@@ -293,8 +284,6 @@ def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
                     ))
                     w_offset += w_len
             else:
-                # 词文本与段文本不完全匹配（可能含标点差异）
-                # 按词字符数比例分配段内字符位置
                 total_word_chars = sum(len(w.get("text", "")) for w in words)
                 if total_word_chars > 0:
                     w_offset = 0
@@ -303,7 +292,6 @@ def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
                         w_len = len(w_text)
                         char_start = start_idx + int(w_offset / total_word_chars * len(text))
                         char_end = start_idx + int((w_offset + w_len) / total_word_chars * len(text))
-                        # 确保最后一个词覆盖到段末尾
                         if w == words[-1]:
                             char_end = start_idx + len(text)
                         word_boundaries.append((char_start, char_end, w["start_sec"], w["end_sec"]))
@@ -311,72 +299,44 @@ def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
                 else:
                     word_boundaries.append((start_idx, start_idx + len(text), seg_start_sec, seg_end_sec))
         else:
-            # 无词级数据：退回到段落级边界
             word_boundaries.append((start_idx, start_idx + len(text), seg_start_sec, seg_end_sec))
 
     if not word_boundaries:
         return asr_result
 
-    # 2. 可选：LLM 修复合并后的文本（修复断词、误加标点等）
-    if llm_fix:
-        print("使用 LLM 修复 ASR 文本...")
-        corrected_text = llm_fix_asr_text(full_text)
-    else:
-        corrected_text = full_text
-
-    # 3. 按逗号逐句切分，每小句独立成段
-    SENTENCE_END = r'[。！？!?]'
-    COMMA = r'[，,；;：:]'
-
-    # 先按句号切分出完整句子
-    raw_sentences = re.split(f'(?<={SENTENCE_END})', corrected_text)
-    raw_sentences = [s.strip() for s in raw_sentences if s.strip()]
-
-    # 再按逗号切分，每小句独立成段
-    sentences = []
-    for sent in raw_sentences:
-        parts = re.split(f'(?<={COMMA})', sent)
-        parts = [p.strip() for p in parts if p.strip()]
-        for part in parts:
-            # 去掉末尾的逗号/分号等
-            part = re.sub(r'[，,；;：:]+$', '', part.strip())
-            if not part:
-                continue
-            # 确保每小句以句号结尾
-            if not re.search(r'[。！？!?]$', part):
-                part += '。'
-            sentences.append(part)
-
-    if not sentences:
-        return asr_result
-
-    # 4. 根据字符位置映射时间戳（使用词级时间线，比段落级更精确）
     if has_words:
         print(f"使用词级时间戳映射（{len(word_boundaries)} 个词）")
 
-    # 如果 LLM 修正了文本，建立 corrected→original 字符位置对齐
-    char_map = None  # char_map[i] = corrected_text[i] 对应的 full_text 字符位置
-    if llm_fix and corrected_text != full_text:
-        from difflib import SequenceMatcher
-        sm = SequenceMatcher(None, full_text, corrected_text, autojunk=False)
-        char_map = {}
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag == 'equal':
-                for k in range(j2 - j1):
-                    char_map[j1 + k] = i1 + k
-            elif tag == 'replace':
-                # 替换：按顺序对齐，多余字符映射到最近的原始位置
-                src_len = i2 - i1
-                dst_len = j2 - j1
-                for k in range(dst_len):
-                    char_map[j1 + k] = i1 + min(k, src_len - 1)
-            # delete: 原文有而修正文没有，跳过
-            # insert: 修正文多出的字符，映射到前一个原始位置
-            elif tag == 'insert':
-                prev_orig = char_map.get(j1 - 1, i1)
-                for k in range(j2 - j1):
-                    char_map[j1 + k] = prev_orig
-        print(f"LLM 修正后字符对齐: {len(char_map)} 个字符映射到原文")
+    # ── 2. LLM 断句 + 纠错 ──────────────────────────────────────
+
+    sentences = _llm_resegment_asr_text(full_text)
+    if not sentences:
+        return asr_result
+
+    # ── 3. 拼接 LLM 输出 → SequenceMatcher 字符对齐 ─────────────
+
+    corrected_text = "".join(sentences)
+
+    from difflib import SequenceMatcher
+    sm = SequenceMatcher(None, full_text, corrected_text, autojunk=False)
+    char_map = {}
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == 'equal':
+            for k in range(j2 - j1):
+                char_map[j1 + k] = i1 + k
+        elif tag == 'replace':
+            src_len = i2 - i1
+            dst_len = j2 - j1
+            for k in range(dst_len):
+                char_map[j1 + k] = i1 + min(k, src_len - 1)
+        elif tag == 'insert':
+            prev_orig = char_map.get(j1 - 1, i1)
+            for k in range(j2 - j1):
+                char_map[j1 + k] = prev_orig
+
+    print(f"LLM 文本对齐: {len(char_map)} 字符映射到原文")
+
+    # ── 4. 逐句映射时间戳 ──────────────────────────────────────
 
     new_segments = []
     char_pos = 0
@@ -384,19 +344,11 @@ def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
     for sent in sentences:
         sent_chars = len(sent)
 
-        # 统一使用词级时间线映射，不再对 llm_fix 做比例估算
-        if char_map is not None:
-            # LLM 修正后：通过字符对齐映射回原文位置
-            orig_start = char_map.get(char_pos, 0)
-            orig_end = char_map.get(char_pos + sent_chars - 1, len(full_text) - 1)
-            start_sec = _map_char_to_time(orig_start, word_boundaries)
-            end_sec = _map_char_to_time(orig_end + 1, word_boundaries)
-        else:
-            # 使用词级时间线映射字符位置到时间
-            start_sec = _map_char_to_time(char_pos, word_boundaries)
-            end_sec = _map_char_to_time(char_pos + sent_chars, word_boundaries)
+        orig_start = char_map.get(char_pos, 0)
+        orig_end = char_map.get(char_pos + sent_chars - 1, len(full_text) - 1)
+        start_sec = _map_char_to_time(orig_start, word_boundaries)
+        end_sec = _map_char_to_time(orig_end + 1, word_boundaries)
 
-        # 确保结束时间 > 开始时间
         if end_sec <= start_sec:
             end_sec = start_sec + max(1.0, sent_chars * 0.15)
 
@@ -621,8 +573,6 @@ def generate_srt(asr_result: dict, output_path: str):
         text = seg.get("text", "").strip()
         if not text:
             continue
-        # 移除所有标点符号，用空格代替
-        text = re.sub(r'[，。、；：！？,;:!?.]+', ' ', text).strip()
         start_srt = seg.get("start", "00:00:00.000").replace(".", ",")
         end_srt = seg.get("end", "00:00:00.000").replace(".", ",")
         srt_lines.extend([str(idx), f"{start_srt} --> {end_srt}", text, ""])
@@ -751,7 +701,6 @@ def run_bili(
     audio_file: str = None,
     skip_asr: bool = False,
     asr_file: str = None,
-    llm_fix: bool = False,
 ):
     """B站视频转写主流程
 
@@ -824,7 +773,7 @@ def run_bili(
         asr_result = asr_transcribe(audio_path, use_words=False)
 
         # 自动重断句
-        asr_result = resegment_asr(asr_result, llm_fix=llm_fix)
+        asr_result = resegment_asr(asr_result)
 
         srt_path = os.path.join(video_dir, f"{audio_base}.srt")
         generate_srt(asr_result, srt_path)
