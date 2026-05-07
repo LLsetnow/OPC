@@ -338,13 +338,10 @@ def resegment_asr(asr_result: dict, llm_fix: bool = False) -> dict:
         parts = re.split(f'(?<={COMMA})', sent)
         parts = [p.strip() for p in parts if p.strip()]
         for part in parts:
-            # 去掉末尾的逗号/分号等
-            part = re.sub(r'[，,；;：:]+$', '', part.strip())
-            if not part:
+            if not part.strip():
                 continue
-            # 确保每小句以句号结尾
-            if not re.search(r'[。！？!?]$', part):
-                part += '。'
+            # 移除所有标点符号，用空格代替
+            part = re.sub(r'[，。、；：！？,;:!?.\s]+', ' ', part.strip()).strip()
             sentences.append(part)
 
     if not sentences:
