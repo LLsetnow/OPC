@@ -244,7 +244,7 @@ QWEN_TTS_VOICES_BY_MODEL = {
 
 def _text_to_speech_qwen(
     text: str,
-    voice: str = "longxiaochun_v2",
+    voice: str = "longhuhu_v3",
     output_path: str = "output.wav",
     speed: float = 1.0,
     response_format: str = "wav",

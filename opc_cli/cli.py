@@ -217,13 +217,12 @@ def tts(
     voice_name: Optional[str] = typer.Option(None, "--voice-name", help="克隆音色名称"),
     list_voices: bool = typer.Option(False, "--list-voices", help="列出系统音色"),
     list_cloned: bool = typer.Option(False, "--list-cloned", help="列出已克隆的音色"),
-    engine: str = typer.Option("glm-tts", "--engine", help="TTS 引擎: glm-tts (智谱) / qwen-tts (阿里云 CosyVoice)"),
+    engine: str = typer.Option("qwen-tts", "--engine", help="TTS 引擎: glm-tts (智谱) / qwen-tts (阿里云 CosyVoice)"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
     """文字转语音（支持音色克隆）
 
     使用 --list-voices 查看系统音色，--list-cloned 查看克隆音色。
-    使用 --engine qwen-tts 切换到阿里云 CosyVoice 引擎。
     """
     load_env(env_file)
     api_key, base_url = get_api_config()
@@ -252,9 +251,9 @@ def tts(
         raise typer.Exit(1)
 
     selected_voice = voice
-    # qwen-tts 引擎默认音色不是 tongtong
+    # qwen-tts 引擎默认音色
     if engine == "qwen-tts" and voice == "tongtong":
-        selected_voice = "longxiaochun_v2"
+        selected_voice = "longhuhu_v3"
 
     if clone:
         if not ref_audio:
