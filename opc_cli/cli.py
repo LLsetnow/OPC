@@ -220,7 +220,10 @@ def tts(
     engine: str = typer.Option("qwen-tts", "--engine", help="TTS 引擎: glm-tts (智谱) / qwen-tts (阿里云 CosyVoice)"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """文字转语音（支持音色克隆）
+    """文字转语音（默认 CosyVoice v3-flash + 龙呼呼音色）
+
+    支持阿里云 CosyVoice 和智谱 GLM-TTS 双引擎。默认使用 CosyVoice v3-flash 模型，
+    音色为龙呼呼（天真烂漫女童）。可通过 --engine glm-tts 切换回智谱引擎。
 
     使用 --list-voices 查看系统音色，--list-cloned 查看克隆音色。
     """

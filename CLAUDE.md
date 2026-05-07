@@ -11,7 +11,7 @@
 | 仅下载B站音频 | `opc bili "URL" --audio-only` | 不做ASR转写 |
 | 跳过下载直接转写 | `opc bili --skip-download` | 从output目录查找已有音频 |
 | 跳过下载和ASR直接总结 | `opc bili --skip-download --skip-asr` | 从output目录查找已有字幕 |
-| 文字转语音(智谱) | `opc tts "文本" -o output.wav` | 支持7种预设音色+音色克隆 |
+| 文字转语音(CosyVoice) | `opc tts "文本" -o output.wav` | 默认 CosyVoice v3-flash + 龙呼呼音色，支持音色克隆 |
 | 文字转语音(本地Qwen3) | `opc local-tts "文本" -o output.wav` | 本地模型，需GPU |
 | 图片理解/分析 | `opc read-img image.png` | 支持本地图片和URL，自动压缩超大图 |
 | 自定义图片提问 | `opc read-img image.png -p "问题"` | 如分析UI控件位置 |

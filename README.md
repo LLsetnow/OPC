@@ -124,33 +124,31 @@ opc bili "https://..." --cookies ./cookies.txt
 
 ---
 
-## tts — 文字转语音（智谱 GLM-TTS）
+## tts — 文字转语音（CosyVoice + GLM-TTS）
 
-使用智谱 GLM-TTS 模型将文本转为语音，支持 7 种预设音色和音色克隆。
+默认使用阿里云 CosyVoice v3-flash 模型，音色为 **龙呼呼（天真烂漫女童）**。同时支持智谱 GLM-TTS 引擎（`--engine glm-tts`）。
 
 ### 使用范例
 
 ```bash
-# 默认音色（彤彤）
+# 默认 (CosyVoice v3-flash + 龙呼呼音色)
 opc tts "你好，今天天气真不错" -o output.wav
 
-# 指定音色
-opc tts "你好" -o output.wav --voice xiaochen
+# 指定 CosyVoice 音色
+opc tts "欢迎收听" -o output.wav --voice longhuhu_v3
+opc tts "新闻播报" -o output.wav --voice longshuo_v3
 
-# 调节语速和音量
-opc tts "你好" --speed 1.2 --volume 1.5
+# 切换回智谱引擎
+opc tts "你好" -o output.wav --engine glm-tts --voice tongtong
 
-# 列出系统预设音色
-opc tts --list-voices
+# 调节语速
+opc tts "你好" --speed 1.2
 
-# 列出已克隆的音色
-opc tts --list-cloned
-
-# 用参考音频克隆音色并合成
-opc tts "我是克隆的声音" -o output.wav --clone --ref-audio ref.wav
+# 智谱引擎克隆音色
+opc tts "我是克隆的声音" -o output.wav --engine glm-tts --clone --ref-audio ref.wav
 
 # 克隆时指定参考文本和音色名称
-opc tts "你好世界" -o out.wav --clone --ref-audio ref.wav --ref-text "参考音频的文字" --voice-name my_voice
+opc tts "你好世界" -o out.wav --engine glm-tts --clone --ref-audio ref.wav --ref-text "参考音频的文字" --voice-name my_voice
 ```
 
 ### 参数
@@ -159,12 +157,13 @@ opc tts "你好世界" -o out.wav --clone --ref-audio ref.wav --ref-text "参考
 |---|---|---|---|
 | `text` | | | 要转换的文本（`--list-voices` 时可省略） |
 | `--output` | `-o` | `output.wav` | 输出音频文件路径 |
-| `--voice` | | `tongtong` | 音色名称或克隆音色 ID |
+| `--voice` | | `tongtong` | 音色名称（qwen-tts 引擎默认 `longhuhu_v3`） |
 | `--speed` | | `1.0` | 语速 [0.5, 2] |
-| `--volume` | | `1.0` | 音量 (0, 10] |
+| `--volume` | | `1.0` | 音量 (0, 10]（仅 glm-tts 引擎） |
 | `--format` | | `wav` | 音频格式：`wav` / `pcm` |
-| `--watermark` | | `false` | 添加 AI 生成水印 |
-| `--clone` | | `false` | 启用音色克隆模式 |
+| `--engine` | | `qwen-tts` | TTS 引擎：`qwen-tts`（CosyVoice）/ `glm-tts`（智谱） |
+| `--watermark` | | `false` | 添加 AI 生成水印（仅 glm-tts 引擎） |
+| `--clone` | | `false` | 启用音色克隆模式（仅 glm-tts 引擎） |
 | `--ref-audio` | | | 克隆参考音频（mp3/wav，≤10MB） |
 | `--ref-text` | | | 参考音频对应文本（可选） |
 | `--voice-name` | | | 克隆音色命名（可选） |
@@ -172,11 +171,28 @@ opc tts "你好世界" -o out.wav --clone --ref-audio ref.wav --ref-text "参考
 | `--list-cloned` | | `false` | 列出已克隆的音色 |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
-### 预设音色
+### CosyVoice 预设音色（默认引擎）
+
+qwen-tts 引擎支持 60+ 系统音色，涵盖童声、语音助手、社交陪伴、有声书、方言、新闻播报、直播带货等类别。
+
+| 类别 | 代表音色 |
+|---|---|
+| 童声 | `longhuhu_v3` 龙呼呼, `longpaopao_v3` 龙泡泡, `longniuniu_v3` 龙牛牛 |
+| 标杆 | `longanyang` 龙安洋（阳光大男孩）, `longanhuan` 龙安欢（欢脱元气女） |
+| 语音助手 | `longxiaochun_v3` 龙小淳, `longxiaoxia_v3` 龙小夏, `longyumi_v3` YUMI |
+| 社交陪伴 | `longhua_v3` 龙华, `longcheng_v3` 龙橙, `longyan_v3` 龙颜 |
+| 有声书 | `longmiao_v3` 龙妙, `longyue_v3` 龙悦, `longxiu_v3` 龙修 |
+| 方言 | `longjiaxin_v3` 龙嘉欣（粤语）, `longlaotie_v3` 龙老铁（东北） |
+| 新闻播报 | `longshuo_v3` 龙硕, `loongbella_v3` Bella3.0 |
+| 直播带货 | `longanran_v3` 龙安燃, `longanxuan_v3` 龙安宣 |
+
+完整音色列表见代码 `opc_cli/tts.py` 中的 `QWEN_TTS_VOICES_V3`。
+
+### GLM-TTS 预设音色（`--engine glm-tts`）
 
 | 音色 ID | 名称 |
 |---|---|
-| `tongtong` | 彤彤（默认） |
+| `tongtong` | 彤彤（glm-tts 默认） |
 | `xiaochen` | 小陈 |
 | `chuichui` | 锤锤 |
 | `jam` | jam |
@@ -186,7 +202,7 @@ opc tts "你好世界" -o out.wav --clone --ref-audio ref.wav --ref-text "参考
 
 ### 长文本处理
 
-文本超过 1024 字符时自动按句号、问号、叹号分段合成，拼接为完整音频。
+超长文本自动按标点分段合成，拼接为完整音频。
 
 ---
 
