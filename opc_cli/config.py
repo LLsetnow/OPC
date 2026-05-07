@@ -139,7 +139,7 @@ def get_qwen_tts_config() -> tuple:
     其次回退到 IMAGE_API_KEY（阿里云 DashScope）。
     """
     api_key = os.environ.get("QWEN_TTS_API_KEY") or os.environ.get("IMAGE_API_KEY", "")
-    model = os.environ.get("QWEN_TTS_MODEL", "cosyvoice-v3-plus")
+    model = os.environ.get("QWEN_TTS_MODEL", "cosyvoice-v3-flash")
 
     if not api_key:
         print("错误: 未设置 QWEN_TTS_API_KEY 或 IMAGE_API_KEY 环境变量")
