@@ -1,6 +1,6 @@
 # OPC CLI
 
-OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + AI日报。
+OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + ComfyUI + AI日报。
 
 ## 安装
 
@@ -55,12 +55,14 @@ IMAGE_API_KEY=your_image_api_key_here
 ```
 opc                  显示帮助
 opc bili             B站视频下载 + ASR 转写 + 内容总结
+opc asr              语音识别：音频 → SRT/JSON 字幕
 opc tts              文字转语音（支持音色克隆）
 opc local-tts        本地语音合成 + 服务管理（Qwen3-TTS）
 opc read-img         图片理解：使用视觉模型分析图片内容
 opc ui2vue           UI截图转Vue：分析 UI 截图生成 Vue 3 组件代码
 opc gpt-img          GPT-Image-2 文生图
 opc Z-image          阿里云 z-image-turbo 文生图
+opc comfyui          ComfyUI 进程管理 + 工作流提交
 opc check-api        检查 .env 中 API 的连通性
 opc news             AI 日报：自动收集 AI 新闻并生成简报
 ```
@@ -121,6 +123,60 @@ opc bili "https://..." --cookies ./cookies.txt
 | `{title}.srt` | SRT 字幕文件 |
 | `{title}.asr.json` | ASR 原始结果（JSON） |
 | `{title}.md` | Markdown 内容总结（含视频时间线链接） |
+
+---
+
+## asr — 语音识别
+
+将音频文件转写为 SRT 字幕和 JSON 文件。使用阿里云 DashScope fun-asr-realtime 模型，支持精确时间戳、LLM 智能断句纠错。
+
+### 使用范例
+
+```bash
+# 基本转写
+opc asr audio.wav
+
+# 指定输出目录
+opc asr recording.mp3 -o ./subtitles
+
+# 不进行自动重断句（保留 ASR 原始切分）
+opc asr audio.wav --no-resegment
+
+# 使用 LLM 修复断词和标点错误
+opc asr audio.wav --llm-fix
+
+# 只识别前 N 秒（方便测试）
+opc asr audio.wav -t 60
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `audio` | | | 输入音频文件（.wav/.mp3/.m4a/.webm/.ogg/.opus 等） |
+| `--output-dir` | `-o` | 输入文件同目录 | 输出目录 |
+| `--no-resegment` | | `false` | 禁用自动重断句（保留 ASR 原始切分） |
+| `--llm-fix` | | `false` | 使用 LLM 修复断词和标点错误 |
+| `--trim` | `-t` | 全文件 | 只识别音频的前 N 秒 |
+
+### 输出文件
+
+| 文件 | 说明 |
+|---|---|
+| `{audio}.srt` | SRT 字幕文件（已断句、去标点） |
+| `{audio}.asr.json` | ASR 原始结果（JSON，含精确时间戳） |
+
+### 处理流程
+
+```
+音频文件 → fun-asr-realtime 转写 → 保存原始 JSON
+                                    ↓
+                              自动重断句（按逗号逐句切分）
+                                    ↓
+                              [可选] LLM 断句纠错
+                                    ↓
+                              生成 SRT 字幕
+```
 
 ---
 
@@ -509,6 +565,112 @@ opc Z-image "测试图" --no-download
 
 ---
 
+---
+
+## comfyui — ComfyUI 进程管理 + 工作流提交
+
+启动/停止 Windows 下的 ComfyUI 服务，提交自定义工作流处理图片。自动检测工作流节点（LoadImage / KSampler / SaveImage / 提示词节点），无需手动配置节点 ID。
+
+### 使用范例
+
+```bash
+# ── 进程管理 ──
+
+# 启动 ComfyUI（WSL 下自动转换路径）
+opc comfyui --start
+
+# 指定端口
+opc comfyui --start --port 8189
+
+# 检查运行状态
+opc comfyui --status
+
+# 关闭 ComfyUI
+opc comfyui --stop
+
+# ── 工作流提交 ──
+
+# 使用默认工作流（confyui/Qwen_remove.json）处理图片
+opc comfyui --run -i photo.jpg
+
+# 指定输出目录
+opc comfyui --run -i photo.jpg -o ./results
+
+# 指定工作流文件
+opc comfyui --run -w confyui/my_workflow.json -i photo.jpg
+
+# 带提示词（用于 Qwen_edit 等支持 prompt 的工作流）
+opc comfyui --run -i photo.jpg -p "去除背景，保持人物不变"
+
+# 指定随机种子（可复现结果）
+opc comfyui --run -i photo.jpg -s 12345
+
+# 自定义采样参数
+opc comfyui --run -i photo.jpg --steps 8 --cfg 2.0 --denoise 0.8
+
+# 指定 ComfyUI 服务地址（WSL2 下会自动检测，通常无需手动指定）
+opc comfyui --run -i photo.jpg --server http://172.30.64.1:8188
+
+# 增大超时时间（大图处理较慢时）
+opc comfyui --run -i photo.jpg -t 600
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| **进程管理** | | | |
+| `--start` | | `false` | 启动 ComfyUI 服务 |
+| `--stop` | | `false` | 关闭 ComfyUI 服务 |
+| `--status` | | 默认行为 | 检查运行状态 |
+| `--listen` | | `0.0.0.0` | 监听地址 |
+| `--port` | | `8188` | 监听端口 |
+| **工作流提交** | | | |
+| `--run` | | `false` | 提交工作流到 ComfyUI 执行 |
+| `--workflow` | `-w` | `confyui/Qwen_remove.json` | 工作流 JSON 文件路径 |
+| `--image` | `-i` | | 输入图片路径 |
+| `--prompt` | `-p` | | 提示词（用于编辑类工作流） |
+| `--seed` | `-s` | 自动生成 | 随机种子 |
+| `--output` | `-o` | 当前目录 | 输出目录 |
+| `--server` | | `http://127.0.0.1:8188` | ComfyUI 服务地址（WSL2 自动检测） |
+| `--timeout` | `-t` | `300` | 最大等待时间（秒） |
+| `--steps` | | | 采样步数 |
+| `--cfg` | | | CFG scale |
+| `--denoise` | | | 去噪强度 |
+| `--output-prefix` | | | 输出文件名前缀 |
+| **高级：节点覆盖** | | | |
+| `--load-image-node` | | 自动检测 | LoadImage 节点 ID |
+| `--ksampler-node` | | 自动检测 | KSampler 节点 ID |
+| `--save-image-node` | | 自动检测 | SaveImage 节点 ID |
+| `--prompt-node` | | 自动检测 | 提示词节点 ID |
+| `--seed-node` | | 自动检测 | 种子节点 ID |
+
+### 工作流文件
+
+工作流 JSON 文件放在 `confyui/` 目录下。关键节点会自动检测：
+
+- **LoadImage** — 输入图片（自动设置文件名）
+- **KSampler** — 采样器（自动设置 seed）
+- **SaveImage** — 输出保存（自动设置前缀）
+- **Prompt 节点** — 含 `prompt` 或 `text` 输入的节点
+
+特殊工作流可通过 `--*-node` 系列参数手动指定节点 ID。
+
+### 环境配置
+
+```bash
+# ComfyUI 安装目录（包含 python/python.exe 和 main.py）
+COMFYUI_ROOT=/mnt/d/AI_Graph/ConfyUI-aki/ComfyUI-aki-v1
+```
+
+### WSL2 注意事项
+
+- ComfyUI 的 `python.exe` 是 Windows 程序，`--start` 自动转换 WSL→Windows 路径
+- WSL2 下 `127.0.0.1` 不通 Windows，`--run` 自动从 `/etc/resolv.conf` 获取宿主 IP
+- 加载 20GB 模型需足够虚拟内存，建议页面文件 ≥ 16GB
+
+---
+
 ## check-api — API 连通性检查
 
 检查 `.env` 中配置的 API 是否可用，显示状态、耗时和详情。
@@ -587,6 +749,7 @@ opc_cli/
 ├── tts_server.py   # TTS 常驻服务（Flask）
 ├── vision.py       # 图片理解（视觉模型）
 ├── ui2vue.py       # UI 截图转 Vue 组件代码
+├── comfyui.py      # ComfyUI 进程管理 + 工作流提交
 ├── check_api.py    # API 连通性检查
 ├── gpt_img.py      # GPT-Image-2 文生图
 ├── text2img.py     # 阿里云 z-image-turbo 文生图

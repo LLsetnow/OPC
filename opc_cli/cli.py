@@ -16,7 +16,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_news_folder
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
 from .bilimusic import run_bilimusic
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
@@ -44,6 +44,7 @@ from .vision import understand_image
 from .ui2vue import ui2vue, save_vue_files, setup_vue_project
 from .ai_daily import run_ai_daily
 from .check_api import run_check_api
+from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
 from .text2img import generate_image, download_image, enhance_prompt, RECOMMENDED_SIZES
 from .gpt_image import (
     submit_and_wait as _gpt_submit_and_wait,
@@ -69,7 +70,7 @@ console = Console()
 @app.command()
 def bili(
     url: str = typer.Argument("", help="Bilibili 视频链接（--skip-download 时可省略）"),
-    output_dir: str = typer.Option("./output", "-o", "--output-dir", help="输出目录"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env BILI_FOLDER 读取，或 ./output）"),
     cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
     audio_only: bool = typer.Option(False, "--audio-only", help="仅下载音频，不进行 ASR"),
     skip_download: bool = typer.Option(False, "--skip-download", help="跳过下载，使用已有音频文件"),
@@ -84,6 +85,9 @@ def bili(
     自动检测：视频目录下已有字幕文件则跳过ASR。
     """
     load_env(env_file)
+
+    if output_dir is None:
+        output_dir = get_bili_folder() or "./output"
 
     if not url and not skip_download:
         console.print("[red]错误: 请提供 Bilibili 视频链接，或使用 --skip-download 跳过下载[/red]")
@@ -1200,6 +1204,107 @@ def check_api(
         raise typer.Exit(1)
 
 
+# ── comfyui 子命令 ──────────────────────────────────────────────
+
+@app.command("comfyui")
+def comfyui_cmd(
+    start: bool = typer.Option(False, "--start", help="启动 ComfyUI"),
+    stop: bool = typer.Option(False, "--stop", help="关闭 ComfyUI"),
+    status: bool = typer.Option(False, "--status", help="检查 ComfyUI 运行状态"),
+    listen: str = typer.Option("0.0.0.0", "--listen", help="监听地址（默认 0.0.0.0）"),
+    port: int = typer.Option(8188, "--port", help="监听端口（默认 8188）"),
+    # 工作流提交参数
+    run: bool = typer.Option(False, "--run", help="提交工作流到 ComfyUI 执行"),
+    workflow: str = typer.Option("confyui/Qwen_remove.json", "-w", "--workflow", help="工作流 JSON 文件路径"),
+    image: Optional[str] = typer.Option(None, "-i", "--image", help="输入图片路径"),
+    prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="提示词（用于支持 prompt 的工作流）"),
+    seed: Optional[int] = typer.Option(None, "-s", "--seed", help="随机种子（不指定则自动生成）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出目录（默认打印输出路径）"),
+    server: str = typer.Option("http://127.0.0.1:8188", "--server", help="ComfyUI 服务地址"),
+    timeout: int = typer.Option(300, "-t", "--timeout", help="最大等待时间（秒）"),
+    steps: Optional[int] = typer.Option(None, "--steps", help="采样步数"),
+    cfg: Optional[float] = typer.Option(None, "--cfg", help="CFG scale"),
+    denoise: Optional[float] = typer.Option(None, "--denoise", help="去噪强度"),
+    output_prefix: Optional[str] = typer.Option(None, "--output-prefix", help="输出文件名前缀"),
+    # 节点ID覆盖（高级用法）
+    load_image_node: Optional[str] = typer.Option(None, "--load-image-node", help="LoadImage 节点 ID（覆盖自动检测）"),
+    ksampler_node: Optional[str] = typer.Option(None, "--ksampler-node", help="KSampler 节点 ID（覆盖自动检测）"),
+    save_image_node: Optional[str] = typer.Option(None, "--save-image-node", help="SaveImage 节点 ID（覆盖自动检测）"),
+    prompt_node: Optional[str] = typer.Option(None, "--prompt-node", help="提示词节点 ID（覆盖自动检测）"),
+    seed_node: Optional[str] = typer.Option(None, "--seed-node", help="种子节点 ID（覆盖自动检测）"),
+):
+    """ComfyUI 进程管理 + 工作流提交
+
+    进程管理:
+
+        opc comfyui --start           # 启动 ComfyUI
+        opc comfyui --start --port 8189
+        opc comfyui --stop            # 关闭 ComfyUI
+        opc comfyui --status          # 查看运行状态
+
+    工作流提交:
+
+        opc comfyui --run -i photo.jpg                    # 使用默认工作流处理图片
+        opc comfyui --run -w my_workflow.json -i img.png  # 指定工作流文件
+        opc comfyui --run -i img.png -p "去掉背景"         # 带提示词
+        opc comfyui --run -i img.png --steps 8 --cfg 2.0  # 自定义采样参数
+        opc comfyui --run -i img.png -o ./results         # 输出到指定目录
+    """
+    load_env()
+
+    # ── 工作流提交 ──
+    if run:
+        try:
+            result_paths = submit_workflow(
+                workflow_path=workflow,
+                server_url=server.rstrip("/"),
+                image=image,
+                prompt=prompt,
+                seed=seed,
+                output_dir=output or ".",
+                timeout=timeout,
+                load_image_node=load_image_node,
+                ksampler_node=ksampler_node,
+                save_image_node=save_image_node,
+                prompt_node=prompt_node,
+                seed_node=seed_node,
+                steps=steps,
+                cfg=cfg,
+                denoise=denoise,
+                output_prefix=output_prefix,
+            )
+            if result_paths:
+                console.print(f"\n[green]完成![/green] 共 {len(result_paths)} 个输出文件:")
+                for p in result_paths:
+                    console.print(f"  {p}")
+        except (FileNotFoundError, RuntimeError) as e:
+            console.print(f"[red]错误: {e}[/red]")
+            raise typer.Exit(1)
+        return
+
+    # ── 进程管理 ──
+    if start:
+        comfyui_root = get_comfyui_config()
+        try:
+            start_comfyui(comfyui_root, listen=listen, port=port)
+        except FileNotFoundError as e:
+            console.print(f"[red]错误: {e}[/red]")
+            raise typer.Exit(1)
+    elif stop:
+        stop_comfyui()
+    else:
+        # 默认显示状态
+        info = check_comfyui()
+        if info["running"]:
+            console.print("[green]ComfyUI 运行中[/green]")
+            console.print(f"  PID: {info['pid']}")
+            console.print(f"  地址: http://{info['listen']}:{info['port']}")
+            console.print(f"  路径: {info['comfyui_root']}")
+            console.print(f"  启动时间: {info['started_at']}")
+        else:
+            console.print("[yellow]ComfyUI 未运行[/yellow]")
+
+
 # ── news 子命令 ──────────────────────────────────────────────
 
 @app.command("news")
@@ -1214,7 +1319,10 @@ def ai_daily(
     信息来源：36氪、虎嗅、IT之家、InfoQ（RSS）、GitHub、Arxiv
     使用 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置大模型
     """
+    if output is None:
+        output = get_news_folder()
     run_ai_daily(output=output, env_file=env_file, no_llm=no_llm, save_raw=save_raw)
+
 
 
 # ── 入口 ──────────────────────────────────────────────────────────

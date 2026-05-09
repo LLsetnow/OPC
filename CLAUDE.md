@@ -11,6 +11,8 @@
 | 仅下载B站音频 | `opc bili "URL" --audio-only` | 不做ASR转写 |
 | 跳过下载直接转写 | `opc bili --skip-download` | 从output目录查找已有音频 |
 | 跳过下载和ASR直接总结 | `opc bili --skip-download --skip-asr` | 从output目录查找已有字幕 |
+| 单独ASR转写 | `opc asr audio.wav` | 将音频转写为 SRT + JSON 字幕 |
+| 语音识别(LLM修复) | `opc asr audio.wav --llm-fix` | LLM 修复断词和标点错误 |
 | 文字转语音(CosyVoice) | `opc tts "文本" -o output.wav` | 默认 CosyVoice v3-flash + 龙呼呼音色，支持音色克隆 |
 | 文字转语音(本地Qwen3) | `opc local-tts "文本" -o output.wav` | 本地模型，需GPU |
 | 图片理解/分析 | `opc read-img image.png` | 支持本地图片和URL，自动压缩超大图 |
@@ -21,6 +23,29 @@
 | 文生图(阿里云) | `opc Z-image "描述"` | 支持种子复现、提示词改写 |
 | API连通性检查 | `opc check-api` | 检查.env中各API可用性 |
 | AI日报 | `opc news` | 自动收集AI新闻生成简报 |
+| ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |
+| ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
+| ComfyUI指定工作流 | `opc comfyui --run -w 工作流 -i 图片 -p 提示词` | 指定工作流/提示词/种子/采样参数 |
+
+### ComfyUI 工作流提交
+
+工作流 JSON 文件统一放在 `confyui/` 目录，默认使用 `Qwen_remove.json`。
+
+**实现原理**：通过 ComfyUI REST API（`/prompt` 提交 + `/history/{id}` 轮询），不依赖 ComfyUI CLI。
+
+**自动节点检测**：`find_nodes_by_class()` 自动识别 LoadImage / KSampler / SaveImage / prompt 节点，无需手动配置。特殊工作流可用 `--load-image-node` 等参数覆盖。
+
+**WSL2 适配**：
+- `--start` 自动将 WSL 路径转为 Windows 格式（传给 `python.exe`）
+- `--run` 自动从 `/etc/resolv.conf` 获取 Windows 宿主 IP（WSL2 下 `127.0.0.1` 不通）
+
+**关键参数**：
+- `-w` — 工作流文件（默认 `confyui/Qwen_remove.json`）
+- `-i` — 输入图片
+- `-p` — 提示词（Qwen_edit 等需要）
+- `-s` — 随机种子
+- `-o` — 输出目录
+- `--steps/--cfg/--denoise` — 采样参数覆盖
 
 ### 使用规则
 
@@ -34,7 +59,7 @@
 
 `opc` 安装在 WSL 的虚拟环境中，执行任何 `opc` 命令前**必须**先激活 venv：
 
-- **常规命令**（bili/bilimusic/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news）：使用 `~/qwen3-tts-venv`
+- **常规命令**（bili/bilimusic/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news/comfyui）：使用 `~/qwen3-tts-venv`
 - **local-tts**（本地Qwen3-TTS）：使用 `~/qwen3-tts-venv`（需要 torch）
 
 ### 命令执行格式
@@ -49,6 +74,12 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 ```bash
 # API检查
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc check-api"
+
+# 单独ASR转写（音频→字幕）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc asr audio.wav"
+
+# ASR + LLM 断句修复
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc asr audio.wav --llm-fix"
 
 # B站视频下载MP3
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc bilimusic 'https://www.bilibili.com/video/BV1xx'"
@@ -73,6 +104,21 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 
 # AI日报
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc news"
+
+# ComfyUI 工作流（使用默认 Qwen_remove 工作流处理图片）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --run -i photo.jpg"
+
+# ComfyUI 指定工作流和提示词
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --run -w confyui/Qwen_remove.json -i photo.jpg -p '去除背景' -o ./output"
+
+# ComfyUI 自定义采样参数
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --run -i photo.jpg --steps 8 --cfg 2.0 -s 12345"
+
+# ComfyUI 启动服务
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --start"
+
+# ComfyUI 状态检查
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --status"
 
 # 本地TTS（需要 qwen3-tts-venv）
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc local-tts '你好' -o output.wav"

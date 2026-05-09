@@ -152,3 +152,23 @@ def get_qwen_tts_config() -> tuple:
 def get_gpt_img_proxy() -> Optional[str]:
     """获取 gpt-img 专用代理地址，未设置则返回 None"""
     return os.environ.get("GPT_IMG_PROXY")
+
+
+def get_comfyui_config() -> str:
+    """获取 ComfyUI 根目录路径"""
+    comfyui_root = os.environ.get("COMFYUI_ROOT", "")
+    if not comfyui_root:
+        print("错误: 未设置 COMFYUI_ROOT 环境变量")
+        print("请在 .env 文件中添加: COMFYUI_ROOT=/path/to/ComfyUI")
+        sys.exit(1)
+    return comfyui_root
+
+
+def get_bili_folder() -> Optional[str]:
+    """获取 B站视频默认输出目录，未设置则返回 None"""
+    return os.environ.get("BILI_FOLDER")
+
+
+def get_news_folder() -> Optional[str]:
+    """获取 AI日报默认输出目录，未设置则返回 None"""
+    return os.environ.get("NEWS_FOLDER")
