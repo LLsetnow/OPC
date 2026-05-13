@@ -173,34 +173,36 @@ def _get_wsl_host_ip() -> Optional[str]:
 def get_gpt_img_proxy() -> Optional[str]:
     """获取 gpt-img 代理地址，自动检测 WSL/Windows 环境
 
-    如果 GPT_IMG_PROXY 未设置，返回 None（不使用代理）。
-    如果已设置，从中提取端口号（默认 7897），并根据当前环境自动选择 IP：
-      - Windows → 127.0.0.1
-      - WSL → 自动从 /etc/resolv.conf 获取 Windows 宿主 IP
+    端口号从 GPT_IMG_PROXY 配置中提取，未配置则默认 7897。
+    IP 根据当前环境自动选择：
+      - WSL → 自动从 /etc/resolv.conf 获取 Windows 宿主 IP（总是启用代理）
+      - Windows → 127.0.0.1（仅当 GPT_IMG_PROXY 已配置时启用）
     """
     proxy_url = os.environ.get("GPT_IMG_PROXY")
-    if not proxy_url:
-        return None
 
-    # 从已有配置中提取端口号
+    # 提取端口号
     port = 7897
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(proxy_url)
-        if parsed.port:
-            port = parsed.port
-    except Exception:
-        pass
+    if proxy_url:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(proxy_url)
+            if parsed.port:
+                port = parsed.port
+        except Exception:
+            pass
 
-    # 根据环境自动选择 IP
     if _is_wsl():
+        # WSL 下总是使用代理（直连不通）
         host_ip = _get_wsl_host_ip()
         if host_ip:
             return f"http://{host_ip}:{port}"
-        # 回退：保留原始配置
-        return proxy_url
-    else:
+        return proxy_url  # 回退
+
+    # Windows：仅当显式配置了代理才启用
+    if proxy_url:
         return f"http://127.0.0.1:{port}"
+
+    return None
 
 
 def get_comfyui_config() -> str:
