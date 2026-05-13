@@ -149,9 +149,58 @@ def get_qwen_tts_config() -> tuple:
     return api_key, model
 
 
+def _is_wsl() -> bool:
+    """检测是否在 WSL 中运行"""
+    try:
+        with open("/proc/version", "r") as f:
+            return "microsoft" in f.read().lower()
+    except Exception:
+        return False
+
+
+def _get_wsl_host_ip() -> Optional[str]:
+    """WSL2 中获取 Windows 宿主 IP（从 /etc/resolv.conf）"""
+    try:
+        with open("/etc/resolv.conf", "r") as f:
+            for line in f:
+                if line.startswith("nameserver"):
+                    return line.split()[1]
+    except Exception:
+        pass
+    return None
+
+
 def get_gpt_img_proxy() -> Optional[str]:
-    """获取 gpt-img 专用代理地址，未设置则返回 None"""
-    return os.environ.get("GPT_IMG_PROXY")
+    """获取 gpt-img 代理地址，自动检测 WSL/Windows 环境
+
+    如果 GPT_IMG_PROXY 未设置，返回 None（不使用代理）。
+    如果已设置，从中提取端口号（默认 7897），并根据当前环境自动选择 IP：
+      - Windows → 127.0.0.1
+      - WSL → 自动从 /etc/resolv.conf 获取 Windows 宿主 IP
+    """
+    proxy_url = os.environ.get("GPT_IMG_PROXY")
+    if not proxy_url:
+        return None
+
+    # 从已有配置中提取端口号
+    port = 7897
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url)
+        if parsed.port:
+            port = parsed.port
+    except Exception:
+        pass
+
+    # 根据环境自动选择 IP
+    if _is_wsl():
+        host_ip = _get_wsl_host_ip()
+        if host_ip:
+            return f"http://{host_ip}:{port}"
+        # 回退：保留原始配置
+        return proxy_url
+    else:
+        return f"http://127.0.0.1:{port}"
 
 
 def get_comfyui_config() -> str:

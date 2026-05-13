@@ -172,18 +172,22 @@ def check_image() -> CheckResult:
 
 
 def check_gpt_image() -> CheckResult:
-    """测试 GPT-Image API（验证 key 和 base_url 连通性）"""
+    """测试 GPT-Image API（验证 key 和 base_url 连通性，自动使用代理）"""
     try:
         api_key, base_url, model = get_gpt_image_config()
     except SystemExit:
         return CheckResult("GPT-Image", False, "未配置 GPT_IMAGE_API_KEY")
+
+    # 构建代理
+    proxy_url = get_gpt_img_proxy()
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
     t0 = time.time()
     try:
         # 尝试调用 models 接口验证 key
         url = f"{base_url}/models"
         headers = {"Authorization": f"Bearer {api_key}"}
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(url, headers=headers, timeout=15, proxies=proxies)
         latency = int((time.time() - t0) * 1000)
 
         if resp.status_code == 401:
