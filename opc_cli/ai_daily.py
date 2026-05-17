@@ -112,9 +112,73 @@ SYSTEM_PROMPT_PROJECTS = """你是一位开源项目观察者。根据提供的�
 3. 不要输出二级标题（标题由外部添加）
 4. 严格按以下格式输出每个项目：
 
-1. 🐙 **项目名 (⭐星数)**  
-   简短概况描述。  
+1. 🐙 **项目名 (⭐星数)**
+   简短概况描述。
    [https://原始链接](https://原始链接)"""
+
+# ── JSON 模式系统提示词 ──────────────────────────────────────────
+
+SYSTEM_PROMPT_NEWS_JSON = """你是一位资深科技媒体编辑。根据提供的新闻素材，筛选出10条与AI/大模型/LLM/AIGC/机器学习/深度学习最相关的技术新闻。
+
+要求：
+1. 必须排除广告、营销、无关内容
+2. 每条包含：标题、简短概况描述（1-2句）、原始链接
+3. 必须输出10条，素材不足时尽量从现有素材中挖掘
+4. 严格以 JSON 数组格式输出，每个元素是一个对象，包含 title/description/url/stars 四个字段
+5. stars 字段始终为 null
+
+输出格式示例：
+[
+  {"title": "新闻标题", "description": "简短概况描述", "url": "https://原始链接", "stars": null}
+]
+
+重要：只输出 JSON 数组，不要输出任何解释、标记或其他文字。"""
+
+SYSTEM_PROMPT_FINANCE_JSON = """你是一位资深财经媒体编辑。根据提供的新闻素材，筛选出10条最重要的时政金融新闻。
+
+重点关注：宏观经济、股市行情、央行政策、地缘政治、贸易政策、科技产业政策、行业监管等。
+要求：
+1. 必须排除广告、营销、无关内容
+2. 每条包含：标题、简短概况描述（1-2句）、原始链接
+3. 必须输出10条，素材不足时尽量从现有素材中挖掘
+4. 严格以 JSON 数组格式输出，每个元素是一个对象，包含 title/description/url/stars 四个字段
+5. stars 字段始终为 null
+
+输出格式示例：
+[
+  {"title": "新闻标题", "description": "简短概况描述", "url": "https://原始链接", "stars": null}
+]
+
+重要：只输出 JSON 数组，不要输出任何解释、标记或其他文字。"""
+
+SYSTEM_PROMPT_PAPERS_JSON = """你是一位AI领域学术编辑。根据提供的论文素材，筛选出5篇最重要的AI学术论文。
+
+要求：
+1. 严格以 JSON 数组格式输出，每个元素是一个对象，包含 title/description/url/stars 四个字段
+2. stars 字段始终为 null
+3. description 为简短概况描述（1-2句）
+
+输出格式示例：
+[
+  {"title": "论文标题", "description": "简短概况描述", "url": "https://arxiv.org/pdf/xxx", "stars": null}
+]
+
+重要：只输出 JSON 数组，不要输出任何解释、标记或其他文字。"""
+
+SYSTEM_PROMPT_PROJECTS_JSON = """你是一位开源项目观察者。根据提供的项目素材，筛选出5个最值得关注的AI开源项目。
+
+要求：
+1. 严格以 JSON 数组格式输出，每个元素是一个对象，包含 title/description/url/stars 四个字段
+2. title 格式为"项目名"，不要包含 emoji 和星数
+3. stars 字段为数字（从素材中提取星数，若没有则为0）
+4. description 为简短概况描述（1-2句）
+
+输出格式示例：
+[
+  {"title": "项目名", "description": "简短概况描述", "url": "https://github.com/owner/repo", "stars": 1234}
+]
+
+重要：只输出 JSON 数组，不要输出任何解释、标记或其他文字。"""
 
 
 
@@ -384,6 +448,119 @@ def generate_daily_report(
     return report
 
 
+def _extract_json_array(text: str, label: str = "") -> list:
+    """从 LLM 输出中提取 JSON 数组，容忍 markdown 代码块包裹。"""
+    text = text.strip()
+
+    # 尝试直接解析
+    try:
+        result = json.loads(text)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试提取 ```json ... ``` 代码块
+    m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if m:
+        try:
+            result = json.loads(m.group(1).strip())
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # 尝试提取第一个 [ ... ] 数组
+    m = re.search(r'\[.*\]', text, re.DOTALL)
+    if m:
+        try:
+            result = json.loads(m.group(0))
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    raise RuntimeError(f"[{label}] 无法从 LLM 输出中提取 JSON 数组，原始输出前200字: {text[:200]}")
+
+
+def generate_daily_json(
+    today: str,
+    news: list[dict],
+    papers: list[dict],
+    projects: list[dict],
+    api_key: str,
+    base_url: str,
+    model: str,
+    max_retries: int = 3,
+) -> str:
+    """调用 LLM 生成 AI 日报 JSON（4 次小请求，直接输出结构化 JSON）"""
+
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=90)
+
+    # ── 第 1 次：AI 技术新闻 → JSON ──
+    print("   🤖 生成 AI 技术新闻板块 (JSON)...")
+    ai_msg = _build_news_msg(today, news, "请从以下新闻中筛选出10条AI相关技术新闻")
+    ai_raw = _call_llm_with_retry(client, model, SYSTEM_PROMPT_NEWS_JSON, ai_msg, max_retries, max_tokens=4096, label="AI新闻JSON")
+    ai_items = _extract_json_array(ai_raw, "AI新闻")
+
+    # ── 第 2 次：时政金融新闻 → JSON ──
+    print("   💰 生成时政金融新闻板块 (JSON)...")
+    fin_msg = _build_news_msg(today, news, "请从以下新闻中筛选出10条最重要的时政金融新闻")
+    fin_raw = _call_llm_with_retry(client, model, SYSTEM_PROMPT_FINANCE_JSON, fin_msg, max_retries, max_tokens=4096, label="时政金融JSON")
+    fin_items = _extract_json_array(fin_raw, "时政金融")
+
+    # ── 第 3 次：论文 → JSON ──
+    print("   📄 生成 AI 论文板块 (JSON)...")
+    papers_msg = f"今天是 {today}，请从以下论文中筛选5篇最重要的AI论文：\n\n"
+    for i, item in enumerate(papers, 1):
+        papers_msg += f"{i}. {item['title']}\n"
+        papers_msg += f"   链接: {item['url']}\n"
+        if item.get("summary"):
+            papers_msg += f"   摘要: {item['summary'][:200]}\n"
+        papers_msg += "\n"
+    papers_raw = _call_llm_with_retry(client, model, SYSTEM_PROMPT_PAPERS_JSON, papers_msg, max_retries, max_tokens=4096, label="论文JSON")
+    paper_items = _extract_json_array(papers_raw, "论文")
+
+    # ── 第 4 次：项目 → JSON ──
+    print("   🐙 生成 AI 项目板块 (JSON)...")
+    projects_msg = f"今天是 {today}，请从以下项目中筛选5个最值得关注的AI开源项目：\n\n"
+    for i, item in enumerate(projects, 1):
+        projects_msg += f"{i}. {item['name']} (⭐{item['stars']})\n"
+        projects_msg += f"   链接: {item['url']}\n"
+        if item.get("description"):
+            projects_msg += f"   描述: {item['description'][:150]}\n"
+        projects_msg += "\n"
+    proj_raw = _call_llm_with_retry(client, model, SYSTEM_PROMPT_PROJECTS_JSON, projects_msg, max_retries, max_tokens=4096, label="项目JSON")
+    proj_items = _extract_json_array(proj_raw, "项目")
+
+    # ── 组装最终 JSON ──
+    def assign_ids(items: list) -> list:
+        for i, item in enumerate(items, 1):
+            item["id"] = i
+            # 确保 stars 字段存在且类型正确
+            if "stars" not in item or item["stars"] is None:
+                item["stars"] = None
+            elif isinstance(item["stars"], str):
+                try:
+                    item["stars"] = int(item["stars"])
+                except ValueError:
+                    item["stars"] = None
+        return items
+
+    result = {
+        "date": today,
+        "sections": [
+            {"name": "AI 技术新闻", "items": assign_ids(ai_items)},
+            {"name": "时政金融新闻", "items": assign_ids(fin_items)},
+            {"name": "AI 学术论文", "items": assign_ids(paper_items)},
+            {"name": "AI 开源项目", "items": assign_ids(proj_items)},
+        ],
+    }
+
+    # updatedAt 在调用方设置（需要 Asia/Shanghai 时间）
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
 # ── 主流程 ──────────────────────────────────────────────────────
 
 def run_ai_daily(
@@ -391,6 +568,7 @@ def run_ai_daily(
     env_file: Optional[str] = None,
     no_llm: bool = False,
     save_raw: bool = False,
+    json_mode: bool = False,
 ):
     """运行 AI 日报收集与生成流程"""
     load_env(env_file)
@@ -446,6 +624,18 @@ def run_ai_daily(
     # 6. LLM 整合（或直接输出原始素材）
     if no_llm:
         report = _format_raw_report(today, all_news, papers, projects)
+    elif json_mode:
+        print("\n🧠 调用 LLM 生成日报 (JSON 模式)...")
+        api_key, base_url, model = get_llm_config()
+        report = generate_daily_json(
+            today=today,
+            news=all_news,
+            papers=papers,
+            projects=projects,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+        )
     else:
         print("\n🧠 调用 LLM 生成日报...")
         api_key, base_url, model = get_llm_config()
@@ -460,7 +650,10 @@ def run_ai_daily(
         )
 
     # 7. 输出
-    if output:
+    if json_mode:
+        # JSON 模式：直接输出到 stdout（调用方负责保存）
+        print(report)
+    elif output:
         out_path = Path(output)
         # 如果路径以 / 结尾或已存在目录，视为目录路径
         if output.endswith("/") or out_path.is_dir():
@@ -473,10 +666,11 @@ def run_ai_daily(
         # 默认保存到 output/ 目录
         out_path = Path("output") / f"ai_daily_{today}.md"
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(str(out_path), "w", encoding="utf-8") as f:
-        f.write(report)
-    print(f"\n✅ 日报已保存: {out_path}")
+    if not json_mode:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(out_path), "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"\n✅ 日报已保存: {out_path}")
 
     return report
 

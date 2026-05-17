@@ -16,7 +16,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_news_folder
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_news_folder, _is_wsl
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
 from .bilimusic import run_bilimusic
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
@@ -932,9 +932,9 @@ def gpt_img(
     load_env(env_file)
     api_key, base_url, cfg_model = get_gpt_image_config()
 
-    # 构建 gpt-img 专用代理（默认不使用）
+    # 构建 gpt-img 专用代理（WSL 下自动启用，直连不通）
     proxies = None
-    if use_proxy:
+    if use_proxy or _is_wsl():
         proxy_url = get_gpt_img_proxy()
         proxies = _gpt_build_proxies(proxy_url)
         if proxies:
@@ -1313,15 +1313,18 @@ def ai_daily(
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
     no_llm: bool = typer.Option(False, "--no-llm", help="不调用 LLM，仅输出原始素材"),
     save_raw: bool = typer.Option(False, "--save-raw", help="额外保存原始 JSON 数据"),
+    json_mode: bool = typer.Option(False, "--json", help="以 JSON 格式输出到 stdout（跳过 markdown 文件写入）"),
 ):
     """AI 日报：自动收集当日 AI 技术/科研/项目新闻，LLM 整合输出专业简报
 
     信息来源：36氪、虎嗅、IT之家、InfoQ（RSS）、GitHub、Arxiv
     使用 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置大模型
+
+    --json 模式：LLM 直接输出结构化 JSON，无需 markdown 解析，适合 CI/CD 集成
     """
-    if output is None:
+    if output is None and not json_mode:
         output = get_news_folder()
-    run_ai_daily(output=output, env_file=env_file, no_llm=no_llm, save_raw=save_raw)
+    run_ai_daily(output=output, env_file=env_file, no_llm=no_llm, save_raw=save_raw, json_mode=json_mode)
 
 
 
