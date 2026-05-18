@@ -461,9 +461,10 @@ opc ui2vue ui.png -p my-dashboard
 
 ---
 
-## gpt-img — GPT-Image-2 文生图
+## gpt-img — GPT-Image-2-Official 文生图
 
-使用 GPT-Image-2 模型根据提示词生成高质量图片，默认使用 LLM 丰富提示词。
+使用 GPT-Image-2-Official（OpenAI 官方模型）根据提示词生成高质量图片，
+异步接口，支持文生图 / 图生图 / 批量生成。默认使用 LLM 丰富提示词。
 
 ### 使用范例
 
@@ -478,6 +479,12 @@ opc gpt-img "山水画" -o ./output/landscape.png
 opc gpt-img "人像" -s 3:4 -r 2k
 opc gpt-img "风景" -s 16:9 -r 1k
 
+# 指定图片质量
+opc gpt-img "海报" --quality high
+
+# 指定输出格式和压缩强度
+opc gpt-img "照片" --output-format jpeg --output-compression 85
+
 # 不使用 LLM 丰富提示词
 opc gpt-img "a cute cat" --no-enhance
 
@@ -487,7 +494,10 @@ opc gpt-img "换成赛博朋克风格" --ref original.png
 # 多张参考图
 opc gpt-img "融合这些风格" --ref img1.png --ref img2.png
 
-# 使用代理
+# 批量生成 4 张
+opc gpt-img "多种方案" --n 4
+
+# WSL 下代理自动启用，Windows 下需手动指定
 opc gpt-img "风景" --proxy
 
 # 仅返回图片 URL，不下载
@@ -500,13 +510,18 @@ opc gpt-img "测试图" --no-download
 |---|---|---|---|
 | `prompt` | | | 提示词（中英文） |
 | `--output` | `-o` | 自动生成 | 输出图片路径 |
-| `--size` | `-s` | `2:3` | 宽高比：1:1, 2:3, 3:2, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16 等 |
-| `--resolution` | `-r` | `1k` | 分辨率档位：1k / 2k / 4k |
+| `--size` | `-s` | `2:3` | 宽高比或像素：15种比例 + auto + 像素（如 1024*1536） |
+| `--resolution` | `-r` | `1k` | 分辨率档位：1k / 2k / 4k（全比例支持 4K） |
+| `--quality` | | `auto` | 图片质量：auto / low / medium / high |
 | `--enhance` | | `true` | 使用 LLM 丰富提示词 |
 | `--ref` | | | 参考图路径或 URL（可多次指定，最多16张） |
+| `--n` | | `1` | 生成张数（1 ~ 4） |
+| `--output-format` | | `png` | 输出格式：png / jpeg / webp |
+| `--output-compression` | | | 压缩强度 0-100（仅 jpeg/webp） |
+| `--moderation` | | `auto` | 审核强度：auto / low |
 | `--no-download` | | `false` | 仅返回图片 URL |
-| `--proxy` | | `false` | 使用 GPT_IMG_PROXY 代理 |
-| `--timeout` | | `300` | 最大等待时间（秒） |
+| `--proxy` | | `false` | WSL 下默认启用，此参数可手动开关 |
+| `--timeout` | | `600` | 最大等待时间（秒） |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
 ---

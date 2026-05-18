@@ -98,7 +98,7 @@ def get_gpt_image_config() -> tuple:
     """
     api_key = os.environ.get("GPT_IMAGE_API_KEY") or os.environ.get("IMAGE_API_KEY", "")
     base_url = os.environ.get("GPT_IMAGE_BASE_URL", "https://api.apimart.ai/v1")
-    model = os.environ.get("GPT_IMAGE_MODEL", "gpt-image-2")
+    model = os.environ.get("GPT_IMAGE_MODEL", "gpt-image-2-official")
 
     if not api_key:
         print("错误: 未设置 GPT_IMAGE_API_KEY 环境变量")

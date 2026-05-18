@@ -53,7 +53,6 @@ from .gpt_image import (
     load_image_as_base64 as _gpt_load_base64,
     _build_proxies as _gpt_build_proxies,
     SUPPORTED_SIZES as _GPT_SIZES,
-    SIZE_4K_ONLY as _GPT_4K_SIZES,
 )
 
 app = typer.Typer(
@@ -910,24 +909,32 @@ def ui2vue_cmd(
 def gpt_img(
     prompt: str = typer.Argument(help="提示词（中英文，描述期望生成的图像）"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/gpt_img_<时间戳>.png）"),
-    size: str = typer.Option("2:3", "-s", "--size", help=f"宽高比: {', '.join(_GPT_SIZES)}"),
-    resolution: str = typer.Option("1k", "-r", "--resolution", help="分辨率档位: 1k / 2k / 4k"),
+    size: str = typer.Option("2:3", "-s", "--size", help=f"宽高比: {', '.join(_GPT_SIZES)}，或像素如 1024*1536"),
+    resolution: str = typer.Option("1k", "-r", "--resolution", help="分辨率档位: 1k / 2k / 4k（全比例均支持 4K）"),
+    quality: str = typer.Option("auto", "--quality", help="图片质量: auto / low / medium / high"),
     enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 LLM 丰富提示词（默认开启）"),
     ref: Optional[list[str]] = typer.Option(None, "--ref", help="参考图路径或 URL（可多次指定，最多16张）"),
+    n: int = typer.Option(1, "--n", help="生成张数 1 ~ 4"),
+    output_format: str = typer.Option("png", "--output-format", help="输出格式: png / jpeg / webp"),
+    output_compression: Optional[int] = typer.Option(None, "--output-compression", help="压缩强度 0-100（仅 jpeg/webp）"),
+    moderation: str = typer.Option("auto", "--moderation", help="审核强度: auto / low"),
     no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
-    use_proxy: bool = typer.Option(False, "--proxy/--no-proxy", help="是否使用 GPT_IMG_PROXY 代理（默认不使用）"),
-    timeout: int = typer.Option(300, "--timeout", help="最大等待时间（秒）"),
+    use_proxy: bool = typer.Option(False, "--proxy/--no-proxy", help="强制使用/禁用代理（WSL 下默认自动启用，无需此参数）"),
+    timeout: int = typer.Option(600, "--timeout", help="最大等待时间（秒）"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """GPT-Image-2 文生图：高质量 AI 绘图（异步，自动轮询等待结果）
+    """GPT-Image-2-Official 文生图：OpenAI 官方模型（异步，自动轮询等待结果）
 
     默认使用 LLM (LLM_MODEL) 丰富提示词，可用 --no-enhance 关闭。
+    WSL 下代理默认自动启用（无需 --proxy），Windows 下需手动 --proxy。
 
-    宽高比: 1:1, 2:3, 3:2, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 2:1, 1:2, 21:9, 9:21
+    宽高比: 1:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 2:1, 1:2, 3:1, 1:3, 21:9, 9:21, auto
 
-    分辨率: 1k(默认) / 2k / 4k（4K仅支持6个宽屏/竖屏比例）
+    分辨率: 1k(默认) / 2k / 4k（全比例均支持 4K，不再有限制）
 
     图生图: 使用 --ref 指定参考图（本地路径或 URL）
+
+    批量生成: --n 4 一次生成 4 张
     """
     load_env(env_file)
     api_key, base_url, cfg_model = get_gpt_image_config()
@@ -940,9 +947,9 @@ def gpt_img(
         if proxies:
             console.print(f"[dim]代理: {proxy_url}[/dim]")
 
-    console.print(f"[bold]=== GPT-Image-2 文生图 ===[/bold]")
+    console.print(f"[bold]=== GPT-Image-2-Official 文生图 ===[/bold]")
     console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-    console.print(f"宽高比: {size} | 分辨率: {resolution} | 模型: {cfg_model}")
+    console.print(f"宽高比: {size} | 分辨率: {resolution} | 质量: {quality} | 张数: {n} | 模型: {cfg_model}")
 
     # 使用 LLM 丰富提示词
     use_prompt = prompt
@@ -962,7 +969,6 @@ def gpt_img(
             use_prompt_json = enhanced["json_str"]
             console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
             if use_prompt_json:
-                # 显示 JSON 结构化提示词
                 console.print(f"[cyan]  丰富(JSON): {use_prompt_json[:300]}{'...' if len(use_prompt_json) > 300 else ''}[/cyan]")
             else:
                 console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
@@ -979,7 +985,6 @@ def gpt_img(
             elif r.startswith("data:"):
                 image_urls.append(r)
             else:
-                # 本地文件转 base64
                 try:
                     data_uri = _gpt_load_base64(r)
                     image_urls.append(data_uri)
@@ -1003,7 +1008,12 @@ def gpt_img(
             model=cfg_model,
             size=size,
             resolution=resolution,
+            quality=quality,
             image_urls=image_urls,
+            n=n,
+            output_format=output_format,
+            output_compression=output_compression,
+            moderation=moderation,
             timeout=timeout,
             on_status=on_status,
             proxies=proxies,
@@ -1023,7 +1033,9 @@ def gpt_img(
         console.print("[red]未获取到图片 URL[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s, 实际生成: {result.get('actual_time', '?')}s)")
+    cost = result.get("cost", 0)
+    actual_time = result.get("actual_time", "?")
+    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s, 实际生成: {actual_time}s, 费用: ${cost:.5f})")
 
     # 输出
     if no_download:
@@ -1032,7 +1044,7 @@ def gpt_img(
     else:
         if not output:
             ts = _time.strftime("%Y%m%d_%H%M%S")
-            output = f"output/gpt_img_{ts}.png"
+            output = f"output/gpt_img_{ts}.{output_format}"
 
         try:
             saved = _gpt_download_image(image_url, output, proxies=proxies)
