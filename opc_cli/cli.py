@@ -16,9 +16,10 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_news_folder, _is_wsl
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_news_folder, get_music_folder, _is_wsl
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
 from .bilimusic import run_bilimusic
+from .music import run_music
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .local_tts import (
     load_model as _local_load_model,
@@ -57,7 +58,7 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + B站音乐下载 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + AI日报 + 文生图",
+    help="OPC 工具集：B站视频转写 + B站音乐下载 + 网易云音乐下载 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + AI日报 + 文生图",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -133,6 +134,51 @@ def bilimusic(
         bitrate=bitrate,
         no_metadata=no_metadata,
         cookies=cookies,
+    )
+
+
+# ── music 子命令 ───────────────────────────────────────────────
+
+@app.command("music")
+def music_cmd(
+    url: str = typer.Argument(..., help="网易云音乐链接（单曲/专辑/歌单/歌手）"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env MUSIC_FOLDER 读取，或 ./output）"),
+    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps)"),
+    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 ID3 元数据写入"),
+    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
+    playlist: bool = typer.Option(False, "--playlist", help="下载全部曲目（专辑/歌单/歌手链接默认已启用）"),
+):
+    """网易云音乐下载 → 转为 MP3（带 ID3 元数据）
+
+    下载网易云音乐音频，转为 MP3 格式，自动写入标题、歌手、专辑、封面等 ID3 标签。
+
+    支持链接类型：
+
+        opc music "https://music.163.com/song?id=xxx"       # 单曲
+        opc music "https://music.163.com/album?id=xxx"      # 专辑
+        opc music "https://music.163.com/playlist?id=xxx"   # 歌单
+        opc music "https://music.163.com/artist?id=xxx"     # 歌手
+
+    示例:
+
+        opc music "https://music.163.com/song?id=2143914149"
+
+        opc music "URL" -o ./music --bitrate 320
+
+        opc music "URL" --no-metadata
+    """
+    load_env()
+
+    if output_dir is None:
+        output_dir = get_music_folder() or "./output"
+
+    run_music(
+        url=url,
+        output_dir=output_dir,
+        bitrate=bitrate,
+        no_metadata=no_metadata,
+        cookies=cookies,
+        playlist=playlist,
     )
 
 

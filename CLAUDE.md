@@ -23,6 +23,7 @@
 | 文生图(阿里云) | `opc Z-image "描述"` | 支持种子复现、提示词改写 |
 | API连通性检查 | `opc check-api` | 检查.env中各API可用性 |
 | AI日报 | `opc news` | 自动收集AI新闻生成简报 |
+| 网易云音乐下载 | `opc music "URL"` | 下载网易云单曲/专辑/歌单 → MP3（含ID3元数据） |
 | ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |
 | ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
 | ComfyUI指定工作流 | `opc comfyui --run -w 工作流 -i 图片 -p 提示词` | 指定工作流/提示词/种子/采样参数 |
@@ -59,7 +60,7 @@
 
 `opc` 安装在 WSL 的虚拟环境中，执行任何 `opc` 命令前**必须**先激活 venv：
 
-- **常规命令**（bili/bilimusic/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news/comfyui）：使用 `~/qwen3-tts-venv`
+- **常规命令**（bili/bilimusic/music/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news/comfyui）：使用 `~/qwen3-tts-venv`
 - **local-tts**（本地Qwen3-TTS）：使用 `~/qwen3-tts-venv`（需要 torch）
 
 ### 命令执行格式
@@ -104,6 +105,12 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 
 # AI日报
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc news"
+
+# 网易云音乐下载（单曲/专辑/歌单）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music 'https://music.163.com/song?id=2143914149'"
+
+# 网易云音乐下载到指定目录 + 高比特率
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music 'https://music.163.com/playlist?id=xxx' -o ./music --bitrate 320"
 
 # ComfyUI 工作流（使用默认 Qwen_remove 工作流处理图片）
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --run -i photo.jpg"

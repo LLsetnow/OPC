@@ -220,6 +220,11 @@ def get_bili_folder() -> Optional[str]:
     return os.environ.get("BILI_FOLDER")
 
 
+def get_music_folder() -> Optional[str]:
+    """获取网易云音乐默认输出目录，未设置则返回 None"""
+    return os.environ.get("MUSIC_FOLDER")
+
+
 def get_news_folder() -> Optional[str]:
     """获取 AI日报默认输出目录，未设置则返回 None"""
     return os.environ.get("NEWS_FOLDER")

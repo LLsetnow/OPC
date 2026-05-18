@@ -29,14 +29,9 @@ RSS_SOURCES = {
     "InfoQ AI": "https://feed.infoq.com/ai-ml-data-eng/",
 }
 
-# ── GitHub API 配置 ──────────────────────────────────────────────
+# ── GitHub API 配置（Trending 热门排行） ─────────────────────────
 
 GITHUB_API = "https://api.github.com/search/repositories"
-GITHUB_PARAMS = {
-    "q": "AI",
-    "per_page": 10,
-    "sort": "updated",
-}
 
 # ── Arxiv API 配置 ──────────────────────────────────────────────
 
@@ -263,31 +258,58 @@ def _clean_html(text: str) -> str:
 # ── GitHub 抓取 ──────────────────────────────────────────────────
 
 def fetch_github() -> list[dict]:
-    """抓取 GitHub AI 相关最新更新项目"""
+    """获取 GitHub Trending 热门 AI 项目排行榜（本周活跃 + 按 stars 排序）
+
+    等效 GitHub Trending 按 stars 排行的热门 AI 开源项目。
+    限定 1k~8w 星范围，过滤掉过于庞大的知名项目，聚焦新锐项目。
+    """
     projects = []
     try:
         headers = {"Accept": "application/vnd.github.v3+json"}
-        # 如果有 GitHub token 可以提高速率限制
+        # 设置 GITHUB_TOKEN 可提高速率限制（https://github.com/settings/tokens）
         gh_token = os.environ.get("GITHUB_TOKEN")
         if gh_token:
             headers["Authorization"] = f"token {gh_token}"
 
-        resp = requests.get(GITHUB_API, params=GITHUB_PARAMS, headers=headers, timeout=15)
+        # 本周活跃的 AI 项目，限定 1k~8w 星，取 50 个后均匀采样 10 个
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+        params = {
+            "q": f"AI stars:1000..80000 pushed:>={cutoff}",
+            "per_page": 50,
+            "sort": "stars",
+            "order": "desc",
+        }
+
+        resp = requests.get(GITHUB_API, params=params, headers=headers, timeout=15)
         resp.raise_for_status()
         data = resp.json()
 
-        for repo in data.get("items", []):
+        all_repos = data.get("items", [])
+        # 均匀取 10 个：按 stars 降序排列后等间距采样，覆盖整个星数区间
+        total = len(all_repos)
+        if total > 10:
+            step = total / 10
+            indices = [min(int(i * step), total - 1) for i in range(10)]
+            selected = [all_repos[i] for i in indices]
+        else:
+            selected = all_repos
+
+        for repo in selected:
             projects.append({
                 "name": repo.get("full_name", ""),
                 "url": repo.get("html_url", ""),
-                "description": repo.get("description", "") or "",
+                "description": repo.get("description") or "",
                 "stars": repo.get("stargazers_count", 0),
                 "language": repo.get("language", ""),
                 "updated_at": repo.get("updated_at", ""),
             })
 
+        if not projects:
+            print("  ⚠ GitHub Trending 暂无数据")
+
     except Exception as e:
-        print(f"  ⚠ GitHub 抓取失败: {e}")
+        print(f"  ⚠ GitHub Trending 抓取失败 ({e})")
+        print("   提示: 设置 GITHUB_TOKEN 环境变量可提高 API 速率限制")
 
     return projects
 
@@ -602,8 +624,8 @@ def run_ai_daily(
     papers = fetch_arxiv()
     print(f"   获取: {len(papers)} 篇论文")
 
-    # 4. 抓取 GitHub
-    print("\n🐙 抓取 GitHub 项目...")
+    # 4. 抓取 GitHub Trending
+    print("\n🐙 抓取 GitHub Trending 热门项目...")
     projects = fetch_github()
     print(f"   获取: {len(projects)} 个项目")
 
