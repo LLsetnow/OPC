@@ -17,38 +17,14 @@ pip install -e .
 
 ## 环境配置
 
-在项目根目录创建 `.env` 文件：
+项目使用 `.env` 文件管理 API Key 和路径配置。复制模版后编辑：
 
 ```bash
-# ── LLM 模型配置 ──
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-LLM_MODEL=glm-4-flash
-
-# ── 智谱 AI API（TTS/ASR 共用）──
-ZHIPU_API_KEY=your_api_key_here
-ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-ASR_MODEL=glm-asr-2512
-
-# ── 视觉模型配置（优先级：VISION_ > ZHIPU_ > LLM_）──
-# VISION_API_KEY=your_vision_api_key_here
-# VISION_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-# VISION_MODEL=glm-5v-turbo
-
-# ── 文生图（阿里云百炼）──
-IMAGE_API_KEY=your_image_api_key_here
-
-# ── GPT-Image 文生图 ──
-# GPT_IMAGE_API_KEY=your_gpt_image_api_key_here
-# GPT_IMAGE_BASE_URL=https://api.apimart.ai/v1
-# GPT_IMAGE_MODEL=gpt-image-2
-
-# ── 代理 ──
-# GPT_IMG_PROXY=http://127.0.0.1:7897
-
-# ── B站 cookies ──
-# YT_DLP_COOKIES=./cookies.txt
+cp .env.example .env
+# 然后编辑 .env 填入 API Key
 ```
+
+`.env.example` 包含所有可用配置项及详细说明，也有 API Key 回退链的优先级说明。
 
 ## 命令一览
 
@@ -66,6 +42,25 @@ opc comfyui          ComfyUI 进程管理 + 工作流提交
 opc check-api        检查 .env 中 API 的连通性
 opc news             AI 日报：自动收集 AI 新闻并生成简报
 ```
+
+---
+
+## 环境变量速查
+
+| 环境变量 | 用途 | 涉及命令 |
+|---|---|---|
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | LLM 大模型（总结/日报/提示词丰富/代码生成） | bili, news, asr --llm-fix, gpt-img, Z-image, ui2vue, check-api |
+| `ZHIPU_API_KEY` / `ZHIPU_BASE_URL` | 智谱 API（TTS 引擎/音色克隆），也作为 Vision/LLM 回退 | tts --engine glm-tts, check-api |
+| `QWEN_TTS_API_KEY` / `QWEN_TTS_MODEL` / `VOICE_ID1/2` | 阿里云 CosyVoice TTS（默认引擎） | tts (默认) |
+| `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL` | 视觉模型（图片理解/UI 分析） | read-img, ui2vue |
+| `DASHSCOPE_API_KEY` / `ASR_API_KEY` / `ASR_MODEL` | 阿里云 ASR 语音识别 | asr, bili |
+| `IMAGE_API_KEY` / `IMAGE_MODEL` | 阿里云文生图，也作为 ASR/TTS/GPT-Img 回退 | Z-image |
+| `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
+| `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
+| `YT_DLP_COOKIES` | B站 cookies 文件路径 | bili, bilimusic |
+| `BILI_FOLDER` | bili 默认输出目录 | bili |
+| `NEWS_FOLDER` | news 默认输出目录 | news |
+| `COMFYUI_ROOT` | ComfyUI 根目录 | comfyui --start |
 
 ---
 
