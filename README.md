@@ -1,6 +1,6 @@
 # OPC CLI
 
-OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + ComfyUI + AI日报。
+OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + 本地/云扉 ComfyUI + AI日报。
 
 ## 安装
 
@@ -39,6 +39,7 @@ opc ui2vue           UI截图转Vue：分析 UI 截图生成 Vue 3 组件代码
 opc gpt-img          GPT-Image-2 文生图
 opc Z-image          阿里云 z-image-turbo 文生图
 opc comfyui          ComfyUI 进程管理 + 工作流提交
+opc aigate           云扉 AIGate ComfyUI 实例管理 + 工作流提交
 opc check-api        检查 .env 中 API 的连通性
 opc news             AI 日报：自动收集 AI 新闻并生成简报
 ```
@@ -61,6 +62,8 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 | `BILI_FOLDER` | bili 默认输出目录 | bili |
 | `NEWS_FOLDER` | news 默认输出目录 | news |
 | `COMFYUI_ROOT` | ComfyUI 根目录 | comfyui --start |
+| `AIGATE_TOKEN` | 云扉 Bearer Token | aigate |
+| `AIGATE_SKU_NAME` / `AIGATE_AREA_NAME` / `AIGATE_IMAGE_ID` / `AIGATE_IMAGE_TYPE` | 显式创建云扉实例的预设 GPU、区域和镜像 | aigate --start --create |
 
 ---
 
@@ -681,6 +684,53 @@ COMFYUI_ROOT=/mnt/d/AI_Graph/ConfyUI-aki/ComfyUI-aki-v1
 
 ---
 
+## aigate — 云扉 AIGate ComfyUI
+
+管理云扉中的 ComfyUI 实例，并通过其公开的原生 ComfyUI API 上传输入图、提交 API 格式工作流、等待完成并下载输出。Token 仅用于云扉 OpenAPI；访问实例的 ComfyUI 接口时不会携带 Token。
+
+### 环境配置
+
+```bash
+# 必填：云扉控制台的 Bearer Token（可带或不带 "Bearer " 前缀）
+AIGATE_TOKEN=your_aigate_token
+
+# 仅在明确创建一台新实例时需要；不要将账户专属镜像 ID 写进共享配置。
+AIGATE_SKU_NAME=your_gpu_sku
+AIGATE_AREA_NAME=your_area
+AIGATE_IMAGE_ID=your_image_id
+AIGATE_IMAGE_TYPE=2
+```
+
+`--start` 只会启动已有的实例，避免一次任务意外创建计费资源。创建新实例必须同时使用 `--create`，并且为避免重复计费，云扉控制台中已有任何实例时会被拒绝。
+
+### 使用范例
+
+```bash
+# 查看当前实例和状态
+opc aigate --status
+
+# 启动指定的已有实例，并等待 ComfyUI 服务可用
+opc aigate --start --instance INSTANCE_ID
+
+# 启动实例后，立即提交工作流；输入图会上传到云端，结果下载到本地目录
+opc aigate --start --instance INSTANCE_ID --run \
+  -w workflow_api.json -i photo.png -p "去除背景" -o ./results
+
+# 已有实例正在运行时，可直接提交
+opc aigate --run -w workflow_api.json -i photo.png -o ./results
+
+# 明确创建一台新实例（该操作可能产生云资源费用）
+opc aigate --start --create \
+  --sku GPU_SKU --area AREA --image-id IMAGE_ID --image-type 2
+
+# 关闭实例：必须明确指定 ID，避免误关其他实例
+opc aigate --stop --instance INSTANCE_ID
+```
+
+工作流应为 ComfyUI 的 API JSON 格式。CLI 会自动识别 `LoadImage`、`KSampler`、`SaveImage` 与带 `prompt`/`text` 输入的节点；对于特殊工作流，可沿用 `--load-image-node`、`--prompt-node` 等节点覆盖参数。
+
+---
+
 ## check-api — API 连通性检查
 
 检查 `.env` 中配置的 API 是否可用，显示状态、耗时和详情。
@@ -760,6 +810,7 @@ opc_cli/
 ├── vision.py       # 图片理解（视觉模型）
 ├── ui2vue.py       # UI 截图转 Vue 组件代码
 ├── comfyui.py      # ComfyUI 进程管理 + 工作流提交
+├── aigate.py       # 云扉 AIGate ComfyUI 实例管理 + 工作流提交
 ├── check_api.py    # API 连通性检查
 ├── gpt_img.py      # GPT-Image-2 文生图
 ├── text2img.py     # 阿里云 z-image-turbo 文生图

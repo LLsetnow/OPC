@@ -46,6 +46,17 @@ from .ui2vue import ui2vue, save_vue_files, setup_vue_project
 from .ai_daily import run_ai_daily
 from .check_api import run_check_api
 from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
+from .aigate import (
+    AigateError,
+    control_instance as _aigate_control_instance,
+    create_instance as _aigate_create_instance,
+    discover_running_comfyui as _aigate_discover_running_comfyui,
+    instance_summary as _aigate_instance_summary,
+    list_instances as _aigate_list_instances,
+    start_comfyui as _aigate_start_comfyui,
+    submit_workflow as _aigate_submit_workflow,
+    wait_for_comfyui as _aigate_wait_for_comfyui,
+)
 from .text2img import generate_image, download_image, enhance_prompt, RECOMMENDED_SIZES
 from .gpt_image import (
     submit_and_wait as _gpt_submit_and_wait,
@@ -58,7 +69,7 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + B站音乐下载 + 网易云音乐下载 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + AI日报 + 文生图",
+    help="OPC 工具集：B站视频转写 + 音乐下载 + 语音合成 + 图片理解 + UI转Vue + 文生图 + ComfyUI + 云扉 AIGate",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -1361,6 +1372,159 @@ def comfyui_cmd(
             console.print(f"  启动时间: {info['started_at']}")
         else:
             console.print("[yellow]ComfyUI 未运行[/yellow]")
+
+
+# ── aigate 子命令 ───────────────────────────────────────────────
+
+@app.command("aigate")
+def aigate_cmd(
+    start: bool = typer.Option(False, "--start", help="启动已有的云扉 ComfyUI 实例并等待服务就绪"),
+    create: bool = typer.Option(False, "--create", help="创建一台新实例（仅可与 --start 一起使用，可能产生云资源费用）"),
+    stop: bool = typer.Option(False, "--stop", help="关闭指定的云扉实例"),
+    status: bool = typer.Option(False, "--status", help="查看云扉实例状态"),
+    run: bool = typer.Option(False, "--run", help="向运行中的云扉 ComfyUI 提交工作流"),
+    token: Optional[str] = typer.Option(None, "--token", help="云扉 Bearer Token（默认读取 AIGATE_TOKEN）"),
+    instance: Optional[str] = typer.Option(None, "--instance", help="云扉实例 ID；省略时自动选择第一个可用 ComfyUI 实例"),
+    sku: Optional[str] = typer.Option(None, "--sku", help="创建实例使用的 GPU SKU（默认读取 AIGATE_SKU_NAME）"),
+    area: Optional[str] = typer.Option(None, "--area", help="创建实例所在区域（默认读取 AIGATE_AREA_NAME）"),
+    image_id: Optional[str] = typer.Option(None, "--image-id", help="创建实例使用的云扉镜像 ID（默认读取 AIGATE_IMAGE_ID）"),
+    image_type: Optional[str] = typer.Option(None, "--image-type", help="云扉镜像类型：2=社区，3=个人（默认读取 AIGATE_IMAGE_TYPE）"),
+    workflow: Optional[str] = typer.Option(None, "-w", "--workflow", help="ComfyUI API 格式工作流 JSON（--run 时必填）"),
+    image: Optional[str] = typer.Option(None, "-i", "--image", help="上传到云端 ComfyUI 的输入图片"),
+    prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="提示词（自动识别 prompt/text 节点）"),
+    seed: Optional[int] = typer.Option(None, "-s", "--seed", help="随机种子（默认自动生成）"),
+    output: str = typer.Option(".", "-o", "--output", help="云端输出下载目录"),
+    timeout: int = typer.Option(300, "-t", "--timeout", help="工作流最大等待时间（秒）"),
+    ready_timeout: int = typer.Option(300, "--ready-timeout", help="启动实例后等待 ComfyUI 就绪的最长时间（秒）"),
+    steps: Optional[int] = typer.Option(None, "--steps", help="采样步数"),
+    cfg: Optional[float] = typer.Option(None, "--cfg", help="CFG scale"),
+    denoise: Optional[float] = typer.Option(None, "--denoise", help="去噪强度"),
+    output_prefix: Optional[str] = typer.Option(None, "--output-prefix", help="输出文件名前缀"),
+    load_image_node: Optional[str] = typer.Option(None, "--load-image-node", help="LoadImage 节点 ID（覆盖自动检测）"),
+    ksampler_node: Optional[str] = typer.Option(None, "--ksampler-node", help="KSampler 节点 ID（覆盖自动检测）"),
+    save_image_node: Optional[str] = typer.Option(None, "--save-image-node", help="SaveImage 节点 ID（覆盖自动检测）"),
+    prompt_node: Optional[str] = typer.Option(None, "--prompt-node", help="提示词节点 ID（覆盖自动检测）"),
+    seed_node: Optional[str] = typer.Option(None, "--seed-node", help="种子节点 ID（覆盖自动检测）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """云扉（AIGate）ComfyUI：启动实例、提交工作流并下载结果
+
+    常用示例：
+
+        opc aigate --status
+        opc aigate --start --instance INSTANCE_ID
+        opc aigate --start --run -w workflow_api.json -i photo.png -o ./results
+        opc aigate --start --create --sku SKU --area AREA --image-id ID --image-type 2
+
+    ``--start`` 只会启动已有实例。新建实例必须额外明确传入 ``--create``，
+    并配置 SKU、区域和镜像；这样不会因为一次工作流提交意外创建计费资源。
+    """
+    load_env(env_file)
+    aigate_token = token or os.environ.get("AIGATE_TOKEN", "")
+
+    if create and not start:
+        console.print("[red]错误: --create 必须与 --start 一起使用[/red]")
+        raise typer.Exit(1)
+    if stop and (start or create or run):
+        console.print("[red]错误: --stop 不能与 --start、--create 或 --run 同时使用[/red]")
+        raise typer.Exit(1)
+    if run and not workflow:
+        console.print("[red]错误: --run 时必须通过 -w/--workflow 指定工作流 JSON[/red]")
+        raise typer.Exit(1)
+    if stop and not instance:
+        console.print("[red]错误: 为避免关闭错误实例，--stop 时必须提供 --instance INSTANCE_ID[/red]")
+        raise typer.Exit(1)
+
+    if not aigate_token.strip():
+        console.print("[red]错误: 未设置 AIGATE_TOKEN。请在 .env 中配置，或通过 --token 传入。[/red]")
+        raise typer.Exit(1)
+
+    try:
+        if stop:
+            _aigate_control_instance(aigate_token, instance or "", "close")
+            console.print(f"[green]已请求关闭云扉实例: {instance}[/green]")
+            return
+
+        server_info = None
+        if start:
+            if create:
+                existing = _aigate_list_instances(aigate_token)
+                if existing:
+                    raise AigateError("云扉控制台已有实例，为避免重复计费，不能创建新实例。")
+                created = _aigate_create_instance(
+                    aigate_token,
+                    sku or os.environ.get("AIGATE_SKU_NAME", ""),
+                    area or os.environ.get("AIGATE_AREA_NAME", ""),
+                    image_id or os.environ.get("AIGATE_IMAGE_ID", ""),
+                    image_type or os.environ.get("AIGATE_IMAGE_TYPE", ""),
+                )
+                instance = str(created["instanceId"])
+                console.print(f"[yellow]云扉实例已提交创建: {instance}[/yellow]")
+                server_info = _aigate_wait_for_comfyui(
+                    aigate_token,
+                    instance,
+                    timeout=ready_timeout,
+                    on_wait=lambda message: console.print(f"[dim]{message}[/dim]"),
+                )
+            else:
+                server_info = _aigate_start_comfyui(
+                    aigate_token,
+                    instance,
+                    timeout=ready_timeout,
+                    on_wait=lambda message: console.print(f"[dim]{message}[/dim]"),
+                )
+            console.print("[green]云扉 ComfyUI 已就绪[/green]")
+            console.print(f"  实例: {server_info['instance_name']} ({server_info['instance_id']})")
+            console.print(f"  地址: {server_info['base_url']}")
+
+        if run:
+            server_info = server_info or _aigate_discover_running_comfyui(
+                aigate_token, instance
+            )
+            console.print(f"[dim]提交到云扉 ComfyUI: {server_info['base_url']}[/dim]")
+            result_paths = _aigate_submit_workflow(
+                workflow or "",
+                server_info["base_url"],
+                image=image,
+                prompt=prompt,
+                seed=seed,
+                output_dir=output,
+                timeout=timeout,
+                load_image_node=load_image_node,
+                ksampler_node=ksampler_node,
+                save_image_node=save_image_node,
+                prompt_node=prompt_node,
+                seed_node=seed_node,
+                steps=steps,
+                cfg=cfg,
+                denoise=denoise,
+                output_prefix=output_prefix,
+            )
+            console.print(f"\n[green]完成![/green] 共 {len(result_paths)} 个输出文件:")
+            for path in result_paths:
+                console.print(f"  {path}")
+            return
+
+        if status or not start:
+            instances = _aigate_list_instances(aigate_token)
+            if not instances:
+                console.print("[yellow]云扉控制台中没有实例[/yellow]")
+                return
+            table = Table(title="云扉实例")
+            table.add_column("实例 ID")
+            table.add_column("名称")
+            table.add_column("状态")
+            for record in instances:
+                summary = _aigate_instance_summary(record)
+                table.add_row(
+                    summary["instance_id"],
+                    summary["instance_name"],
+                    summary["status"] or "未知",
+                )
+            console.print(table)
+    except AigateError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
 
 
 # ── news 子命令 ──────────────────────────────────────────────
