@@ -27,6 +27,8 @@
 | ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |
 | ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
 | ComfyUI指定工作流 | `opc comfyui --run -w 工作流 -i 图片 -p 提示词` | 指定工作流/提示词/种子/采样参数 |
+| 云扉 AIGate 状态 | `opc aigate --status` | 查看云端 ComfyUI 实例状态 |
+| 云扉 AIGate 工作流 | `opc aigate --run -w 工作流 -i 图片` | 向运行中的云端 ComfyUI 提交 API 格式工作流并下载结果 |
 
 ### ComfyUI 工作流提交
 
@@ -47,6 +49,31 @@
 - `-s` — 随机种子
 - `-o` — 输出目录
 - `--steps/--cfg/--denoise` — 采样参数覆盖
+
+### 云扉 AIGate 工作流提交
+
+`opc aigate` 用于发现、启动和使用云扉中的 ComfyUI 实例。凭证从项目根目录 `.env` 的 `AIGATE_TOKEN` 读取；Token 只用于云扉 OpenAPI，提交工作流时访问的是实例的 ComfyUI 服务。
+
+**工作流必须是 ComfyUI API 格式 JSON**：顶层键为节点 ID，节点包含 `class_type` 和 `inputs`。前端画布保存的 JSON（通常含有 `nodes`、`links`、`last_node_id` 等字段）不能直接通过 `--run` 提交；请在 ComfyUI 中导出 **API Format** JSON。
+
+**常用命令**：
+
+```bash
+# 查询云扉实例（状态 2 表示运行中）
+opc aigate --status
+
+# 启动指定的已有实例，等待 ComfyUI 就绪
+opc aigate --start --instance INSTANCE_ID
+
+# 提交安全的 API 格式单图编辑工作流；图片和结果均在本地 Downloads 目录
+opc aigate --run \
+  --workflow ~/Documents/github/OPC/workflows/safe_single_image_edit-api.json \
+  --image ~/Downloads/图片.png \
+  --instance 1130698024358121472 \
+  --output ~/Downloads
+```
+
+续行时反斜杠 `\` 必须是行内最后一个字符，后面不能有空格；也可以将命令写成单行。提交前确认输入文件存在，且不要使用会生成裸露或性化内容的工作流。
 
 ### 使用规则
 
