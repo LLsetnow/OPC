@@ -28,6 +28,9 @@
 | ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
 | ComfyUI指定工作流 | `opc comfyui --run -w 工作流 -i 图片 -p 提示词` | 指定工作流/提示词/种子/采样参数 |
 | 云扉 AIGate 状态 | `opc aigate --status` | 查看云端 ComfyUI 实例状态 |
+| 云扉 AIGate 可用显卡 | `opc aigate --gpus [--area 区域]` | 查询当前账户可创建实例的 GPU SKU |
+| 云扉 AIGate 个人镜像 | `opc aigate --images` | 查询当前账户的个人镜像 |
+| 云扉 AIGate 本地工作流 | `opc aigate --workflows` | 列出仓库 `workflows/` 下的工作流 JSON |
 | 云扉 AIGate 工作流 | `opc aigate --run -w 工作流 -i 图片` | 向运行中的云端 ComfyUI 提交 API 格式工作流并下载结果 |
 
 ### ComfyUI 工作流提交

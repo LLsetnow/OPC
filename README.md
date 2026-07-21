@@ -709,6 +709,19 @@ AIGATE_IMAGE_TYPE=2
 # 查看当前实例和状态
 opc aigate --status
 
+# 查询当前账户可创建实例的 GPU SKU（默认查询华东一区和华东二区）；可用 --area 按区域筛选
+opc aigate --gpus
+opc aigate --gpus --area 华东一区
+
+# 查询当前账户的个人镜像（创建实例时使用 --image-type 3）
+opc aigate --images
+
+# 查询特定区域和 GPU 可用的社区镜像
+opc aigate --community-images --area 华东一区 --sku 4090D-48G
+
+# 列出仓库 workflows/ 中可提交的本地 ComfyUI 工作流（无需 Token）
+opc aigate --workflows
+
 # 启动指定的已有实例，并等待 ComfyUI 服务可用
 opc aigate --start --instance INSTANCE_ID
 
@@ -719,12 +732,19 @@ opc aigate --start --instance INSTANCE_ID --run \
 # 已有实例正在运行时，可直接提交
 opc aigate --run -w workflow_api.json -i photo.png -o ./results
 
+# 视频工作流：上传驱动视频和参考图片
+opc aigate --run -w video_workflow_api.json \
+  --video input.mp4 --reference-image character.png -o ./results
+
 # 明确创建一台新实例（该操作可能产生云资源费用）
 opc aigate --start --create \
   --sku GPU_SKU --area AREA --image-id IMAGE_ID --image-type 2
 
 # 关闭实例：必须明确指定 ID，避免误关其他实例
 opc aigate --stop --instance INSTANCE_ID
+
+# 释放实例：会删除实例资源，必须明确指定 ID
+opc aigate --release --instance INSTANCE_ID
 ```
 
 工作流应为 ComfyUI 的 API JSON 格式。CLI 会自动识别 `LoadImage`、`KSampler`、`SaveImage` 与带 `prompt`/`text` 输入的节点；对于特殊工作流，可沿用 `--load-image-node`、`--prompt-node` 等节点覆盖参数。

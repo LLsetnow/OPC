@@ -17,6 +17,10 @@ from .comfyui import find_nodes_by_class, generate_random_seed
 AIGATE_API_BASE = "https://waas.aigate.cc/api/openapi"
 _DEFAULT_REQUEST_TIMEOUT = 15
 _HOST_RE = re.compile(r"^[A-Za-z0-9.-]+$")
+DEFAULT_WORKFLOW_DIR = Path(__file__).resolve().parent.parent / "workflows"
+# 云扉的 skuList 接口要求 areaName。此列表以当前 OpenAPI 文档为准；传入
+# --area 时始终只查询用户指定的区域。
+_DEFAULT_SKU_AREAS = ("华东一区", "华东二区")
 
 
 class AigateError(RuntimeError):
@@ -33,6 +37,21 @@ def normalize_bearer_token(value: str) -> str:
     return token
 
 
+def list_workflow_files(workflow_dir: Optional[str] = None) -> list[Path]:
+    """返回仓库中可供 ``opc aigate --run`` 使用的 JSON 工作流文件。"""
+    directory = (
+        Path(workflow_dir).expanduser()
+        if workflow_dir
+        else DEFAULT_WORKFLOW_DIR
+    )
+    if not directory.is_dir():
+        raise AigateError(f"工作流目录不存在: {directory}")
+    return sorted(
+        (path for path in directory.rglob("*.json") if path.is_file()),
+        key=lambda path: str(path.relative_to(directory)),
+    )
+
+
 def _safe_json(response: requests.Response, service_name: str) -> dict:
     try:
         body = response.json()
@@ -41,6 +60,17 @@ def _safe_json(response: requests.Response, service_name: str) -> dict:
     if not isinstance(body, dict):
         raise AigateError(f"{service_name} 返回了无效响应")
     return body
+
+
+def _safe_error_message(body: dict) -> str:
+    """提取可展示的简短错误，不回显请求体、响应体或认证信息。"""
+    error = body.get("error")
+    if isinstance(error, dict):
+        value = error.get("message") or error.get("type")
+    else:
+        value = body.get("message") or body.get("msg") or error
+    message = " ".join(str(value or "").split())
+    return message[:300]
 
 
 def _aigate_json(
@@ -104,7 +134,9 @@ def _comfyui_json(
 
     body = _safe_json(response, "ComfyUI")
     if not response.ok:
-        raise AigateError(f"ComfyUI 请求失败（HTTP {response.status_code}）")
+        detail = _safe_error_message(body)
+        suffix = f"：{detail}" if detail else ""
+        raise AigateError(f"ComfyUI 请求失败（HTTP {response.status_code}）{suffix}")
     return body
 
 
@@ -132,6 +164,112 @@ def list_instances(token: str, *, api_base: str = AIGATE_API_BASE) -> list[dict]
             raise AigateError("云扉未返回有效实例总数")
         if total_count < 0:
             raise AigateError("云扉未返回有效实例总数")
+        if len(result) >= total_count or len(records) < page_size:
+            return result
+        current += 1
+
+
+def list_skus(
+    token: str, area_name: Optional[str] = None, *, api_base: str = AIGATE_API_BASE
+) -> list[dict]:
+    """返回当前 Token 可创建实例的 GPU SKU，可按区域筛选。"""
+    selected_area = str(area_name or "").strip()
+    areas = (selected_area,) if selected_area else _DEFAULT_SKU_AREAS
+    result = []
+    seen = set()
+    for area in areas:
+        data = _aigate_json(
+            "GET",
+            "/instance/skuList?" + urlencode({"areaName": area}),
+            token,
+            api_base=api_base,
+        )
+        if not isinstance(data, list):
+            raise AigateError("云扉未返回有效 GPU SKU 列表")
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            key = (str(item.get("areaName") or area), str(item.get("skuName") or ""))
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+    return result
+
+
+def list_personal_images(
+    token: str, *, api_base: str = AIGATE_API_BASE
+) -> list[dict]:
+    """分页返回当前 Token 名下的全部个人镜像。"""
+    page_size = 20
+    current = 1
+    result = []
+    while True:
+        data = _aigate_json(
+            "POST",
+            "/image/page",
+            token,
+            {"current": current, "pageSize": page_size, "imageType": "3"},
+            api_base=api_base,
+        )
+        records = data.get("records") if isinstance(data, dict) else None
+        if not isinstance(records, list):
+            raise AigateError("云扉未返回有效个人镜像列表")
+        result.extend(item for item in records if isinstance(item, dict))
+        total = data.get("total") if isinstance(data, dict) else None
+        try:
+            total_count = int(total)
+        except (TypeError, ValueError):
+            raise AigateError("云扉未返回有效个人镜像总数")
+        if total_count < 0:
+            raise AigateError("云扉未返回有效个人镜像总数")
+        if len(result) >= total_count or len(records) < page_size:
+            return result
+        current += 1
+
+
+def list_community_images(
+    token: str,
+    area_name: str,
+    sku_name: str,
+    image_name: str = "",
+    *,
+    api_base: str = AIGATE_API_BASE,
+) -> list[dict]:
+    """分页返回指定区域和 SKU 下可用的社区镜像。"""
+    area_name = str(area_name or "").strip()
+    sku_name = str(sku_name or "").strip()
+    if not area_name or not sku_name:
+        raise AigateError("查询社区镜像时必须提供 --area 和 --sku。")
+    page_size = 20
+    current = 1
+    result = []
+    while True:
+        data = _aigate_json(
+            "POST",
+            "/image/page",
+            token,
+            {
+                "current": current,
+                "pageSize": page_size,
+                "imageType": "2",
+                "areaName": area_name,
+                "skuName": sku_name,
+                "imageName": str(image_name or "").strip(),
+                "imageVersion": "",
+            },
+            api_base=api_base,
+        )
+        records = data.get("records") if isinstance(data, dict) else None
+        if not isinstance(records, list):
+            raise AigateError("云扉未返回有效社区镜像列表")
+        result.extend(item for item in records if isinstance(item, dict))
+        total = data.get("total") if isinstance(data, dict) else None
+        try:
+            total_count = int(total)
+        except (TypeError, ValueError):
+            raise AigateError("云扉未返回有效社区镜像总数")
+        if total_count < 0:
+            raise AigateError("云扉未返回有效社区镜像总数")
         if len(result) >= total_count or len(records) < page_size:
             return result
         current += 1
@@ -370,23 +508,61 @@ def _workflow_node(workflow: dict, node_id: str, label: str) -> dict:
     return inputs
 
 
-def _upload_image(base_url: str, image_path: Path) -> str:
-    content_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
+def _upload_input_file(base_url: str, input_path: Path) -> str:
+    """上传图片、视频等 ComfyUI input 文件，并返回远端文件名。"""
+    content_type = mimetypes.guess_type(input_path.name)[0] or "application/octet-stream"
     try:
-        with image_path.open("rb") as image_file:
+        with input_path.open("rb") as input_file:
             body = _comfyui_json(
                 "POST",
                 base_url.rstrip("/") + "/upload/image",
-                files={"image": (image_path.name, image_file, content_type)},
+                files={"image": (input_path.name, input_file, content_type)},
                 data={"type": "input"},
                 timeout=60,
             )
     except OSError as exc:
-        raise AigateError(f"无法读取输入图片: {image_path}") from exc
+        raise AigateError(f"无法读取输入文件: {input_path}") from exc
     name = str(body.get("name") or "").strip()
     if not name:
         raise AigateError("ComfyUI 未返回上传文件名")
     return name
+
+
+def _upload_image(base_url: str, image_path: Path) -> str:
+    """兼容现有图片工作流调用。"""
+    return _upload_input_file(base_url, image_path)
+
+
+def _first_node_by_class(workflow: dict, class_type: str) -> Optional[str]:
+    for node_id, node in workflow.items():
+        if isinstance(node, dict) and node.get("class_type") == class_type:
+            return str(node_id)
+    return None
+
+
+def _replace_with_vhs_video_combine(workflow: dict, node_id: str) -> None:
+    """在提交时以 VideoHelperSuite 保存节点替代不可用的自定义视频保存节点。"""
+    original = _workflow_node(workflow, node_id, "视频输出")
+    images = original.get("image") or original.get("images")
+    frame_rate = original.get("fps") or original.get("frame_rate")
+    if images is None or frame_rate is None:
+        raise AigateError("视频输出节点缺少 image 或 fps 输入，无法替换为 VHS_VideoCombine。")
+    inputs = {
+        "images": images,
+        "frame_rate": frame_rate,
+        "loop_count": 0,
+        "filename_prefix": str(original.get("filename") or "video/ComfyUI"),
+        "format": "video/h264-mp4",
+        "pingpong": False,
+        "save_output": True,
+    }
+    if original.get("audio") is not None:
+        inputs["audio"] = original["audio"]
+    workflow[node_id] = {
+        "inputs": inputs,
+        "class_type": "VHS_VideoCombine",
+        "_meta": {"title": "VHS Video Combine (OPC fallback)"},
+    }
 
 
 def _prepare_workflow(
@@ -404,6 +580,11 @@ def _prepare_workflow(
     cfg: Optional[float],
     denoise: Optional[float],
     output_prefix: Optional[str],
+    video: Optional[str] = None,
+    reference_image: Optional[str] = None,
+    video_node: Optional[str] = None,
+    reference_image_node: Optional[str] = None,
+    video_output_node: Optional[str] = None,
 ) -> tuple[dict, str]:
     path = Path(workflow_path)
     if not path.is_file():
@@ -435,6 +616,31 @@ def _prepare_workflow(
         _workflow_node(workflow, image_node, "LoadImage")["image"] = _upload_image(
             base_url, local_image
         )
+
+    if reference_image:
+        local_reference = Path(reference_image)
+        if not local_reference.is_file():
+            raise AigateError(f"参考图片不存在: {reference_image}")
+        selected_reference_node = reference_image_node or image_node
+        if not selected_reference_node:
+            raise AigateError("未找到参考图片 LoadImage 节点，请用 --reference-image-node 指定。")
+        _workflow_node(workflow, selected_reference_node, "参考图片 LoadImage")[
+            "image"
+        ] = _upload_input_file(base_url, local_reference)
+
+    if video:
+        local_video = Path(video)
+        if not local_video.is_file():
+            raise AigateError(f"输入视频不存在: {video}")
+        selected_video_node = video_node or _first_node_by_class(workflow, "VHS_LoadVideo")
+        if not selected_video_node:
+            raise AigateError("未找到 VHS_LoadVideo 节点，请用 --video-node 指定。")
+        _workflow_node(workflow, selected_video_node, "VHS_LoadVideo")["video"] = _upload_input_file(
+            base_url, local_video
+        )
+
+    if video_output_node:
+        _replace_with_vhs_video_combine(workflow, video_output_node)
 
     if seed is None:
         seed = generate_random_seed()
@@ -492,15 +698,16 @@ def _wait_for_history(base_url: str, prompt_id: str, timeout: int) -> dict:
     raise AigateError(f"等待 ComfyUI 工作流超时（prompt_id: {prompt_id}）。")
 
 
-def _output_images(history: dict) -> list[dict]:
-    images = []
+def _output_files(history: dict) -> list[dict]:
+    files = []
     for node_output in history.get("outputs", {}).values():
         if not isinstance(node_output, dict):
             continue
-        for image in node_output.get("images", []):
-            if isinstance(image, dict) and str(image.get("filename") or "").strip():
-                images.append(image)
-    return images
+        for output_type in ("images", "gifs", "videos", "files"):
+            for output_file in node_output.get(output_type, []):
+                if isinstance(output_file, dict) and str(output_file.get("filename") or "").strip():
+                    files.append(output_file)
+    return files
 
 
 def _unique_path(directory: Path, filename: str) -> Path:
@@ -515,11 +722,11 @@ def _unique_path(directory: Path, filename: str) -> Path:
     raise AigateError("输出目录中存在过多同名文件。")
 
 
-def _download_image(base_url: str, image: dict, destination: Path) -> Path:
+def _download_output(base_url: str, output_file: dict, destination: Path) -> Path:
     params = {
-        "filename": str(image.get("filename") or ""),
-        "subfolder": str(image.get("subfolder") or ""),
-        "type": str(image.get("type") or "output"),
+        "filename": str(output_file.get("filename") or ""),
+        "subfolder": str(output_file.get("subfolder") or ""),
+        "type": str(output_file.get("type") or "output"),
     }
     try:
         response = requests.get(
@@ -559,6 +766,11 @@ def submit_workflow(
     cfg: Optional[float] = None,
     denoise: Optional[float] = None,
     output_prefix: Optional[str] = None,
+    video: Optional[str] = None,
+    reference_image: Optional[str] = None,
+    video_node: Optional[str] = None,
+    reference_image_node: Optional[str] = None,
+    video_output_node: Optional[str] = None,
 ) -> list[str]:
     """上传输入、执行工作流并把云端输出下载到本地。"""
     workflow, _ = _prepare_workflow(
@@ -576,6 +788,11 @@ def submit_workflow(
         cfg,
         denoise,
         output_prefix,
+        video,
+        reference_image,
+        video_node,
+        reference_image_node,
+        video_output_node,
     )
     submitted = _comfyui_json(
         "POST",
@@ -588,10 +805,10 @@ def submit_workflow(
         raise AigateError("ComfyUI 未返回 prompt_id。")
 
     history = _wait_for_history(base_url, prompt_id, timeout)
-    images = _output_images(history)
-    if not images:
-        raise AigateError(f"工作流完成但未返回图片输出（prompt_id: {prompt_id}）。")
+    output_files = _output_files(history)
+    if not output_files:
+        raise AigateError(f"工作流完成但未返回输出文件（prompt_id: {prompt_id}）。")
 
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
-    return [str(_download_image(base_url, item, destination)) for item in images]
+    return [str(_download_output(base_url, item, destination)) for item in output_files]

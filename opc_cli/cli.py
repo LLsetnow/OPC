@@ -53,6 +53,10 @@ from .aigate import (
     discover_running_comfyui as _aigate_discover_running_comfyui,
     instance_summary as _aigate_instance_summary,
     list_instances as _aigate_list_instances,
+    list_community_images as _aigate_list_community_images,
+    list_personal_images as _aigate_list_personal_images,
+    list_skus as _aigate_list_skus,
+    list_workflow_files as _aigate_list_workflow_files,
     start_comfyui as _aigate_start_comfyui,
     submit_workflow as _aigate_submit_workflow,
     wait_for_comfyui as _aigate_wait_for_comfyui,
@@ -1381,7 +1385,13 @@ def aigate_cmd(
     start: bool = typer.Option(False, "--start", help="启动已有的云扉 ComfyUI 实例并等待服务就绪"),
     create: bool = typer.Option(False, "--create", help="创建一台新实例（仅可与 --start 一起使用，可能产生云资源费用）"),
     stop: bool = typer.Option(False, "--stop", help="关闭指定的云扉实例"),
+    release: bool = typer.Option(False, "--release", help="释放指定的云扉实例（会删除实例资源）"),
     status: bool = typer.Option(False, "--status", help="查看云扉实例状态"),
+    gpus: bool = typer.Option(False, "--gpus", "--list-gpus", help="查询当前可创建实例的 GPU SKU（可用 --area 筛选）"),
+    images: bool = typer.Option(False, "--images", "--list-images", help="查询当前账户的个人镜像"),
+    community_images: bool = typer.Option(False, "--community-images", help="查询指定区域和 GPU SKU 下的社区镜像"),
+    workflows: bool = typer.Option(False, "--workflows", "--list-workflows", help="列出仓库中可提交的本地工作流（无需云扉 Token）"),
+    workflow_dir: Optional[str] = typer.Option(None, "--workflow-dir", help="要列出的本地工作流目录（默认仓库的 workflows/）"),
     run: bool = typer.Option(False, "--run", help="向运行中的云扉 ComfyUI 提交工作流"),
     token: Optional[str] = typer.Option(None, "--token", help="云扉 Bearer Token（默认读取 AIGATE_TOKEN）"),
     instance: Optional[str] = typer.Option(None, "--instance", help="云扉实例 ID；省略时自动选择第一个可用 ComfyUI 实例"),
@@ -1391,6 +1401,11 @@ def aigate_cmd(
     image_type: Optional[str] = typer.Option(None, "--image-type", help="云扉镜像类型：2=社区，3=个人（默认读取 AIGATE_IMAGE_TYPE）"),
     workflow: Optional[str] = typer.Option(None, "-w", "--workflow", help="ComfyUI API 格式工作流 JSON（--run 时必填）"),
     image: Optional[str] = typer.Option(None, "-i", "--image", help="上传到云端 ComfyUI 的输入图片"),
+    video: Optional[str] = typer.Option(None, "--video", help="上传到云端 ComfyUI 的输入视频（自动写入 VHS_LoadVideo 节点）"),
+    reference_image: Optional[str] = typer.Option(None, "--reference-image", help="参考角色图片（自动写入 LoadImage 节点）"),
+    video_node: Optional[str] = typer.Option(None, "--video-node", help="VHS_LoadVideo 节点 ID（覆盖自动检测）"),
+    reference_image_node: Optional[str] = typer.Option(None, "--reference-image-node", help="参考图片 LoadImage 节点 ID（覆盖自动检测）"),
+    video_output_node: Optional[str] = typer.Option(None, "--video-output-node", help="临时替换为 VHS_VideoCombine 的视频输出节点 ID"),
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="提示词（自动识别 prompt/text 节点）"),
     seed: Optional[int] = typer.Option(None, "-s", "--seed", help="随机种子（默认自动生成）"),
     output: str = typer.Option(".", "-o", "--output", help="云端输出下载目录"),
@@ -1412,6 +1427,9 @@ def aigate_cmd(
     常用示例：
 
         opc aigate --status
+        opc aigate --gpus --area 华东一区
+        opc aigate --images
+        opc aigate --workflows
         opc aigate --start --instance INSTANCE_ID
         opc aigate --start --run -w workflow_api.json -i photo.png -o ./results
         opc aigate --start --create --sku SKU --area AREA --image-id ID --image-type 2
@@ -1425,24 +1443,137 @@ def aigate_cmd(
     if create and not start:
         console.print("[red]错误: --create 必须与 --start 一起使用[/red]")
         raise typer.Exit(1)
-    if stop and (start or create or run):
-        console.print("[red]错误: --stop 不能与 --start、--create 或 --run 同时使用[/red]")
+    if (gpus or images or community_images or workflows) and (start or create or stop or release or status or run):
+        console.print("[red]错误: 资源或工作流查询不能与实例操作同时使用[/red]")
+        raise typer.Exit(1)
+    if workflows and (gpus or images or community_images):
+        console.print("[red]错误: --workflows 不能与资源查询同时使用[/red]")
+        raise typer.Exit(1)
+    if workflow_dir and not workflows:
+        console.print("[red]错误: --workflow-dir 必须与 --workflows 一起使用[/red]")
+        raise typer.Exit(1)
+    if stop and release:
+        console.print("[red]错误: --stop 与 --release 不能同时使用[/red]")
+        raise typer.Exit(1)
+    if (stop or release) and (start or create or run):
+        console.print("[red]错误: --stop / --release 不能与 --start、--create 或 --run 同时使用[/red]")
         raise typer.Exit(1)
     if run and not workflow:
         console.print("[red]错误: --run 时必须通过 -w/--workflow 指定工作流 JSON[/red]")
         raise typer.Exit(1)
-    if stop and not instance:
-        console.print("[red]错误: 为避免关闭错误实例，--stop 时必须提供 --instance INSTANCE_ID[/red]")
+    if (video or reference_image or video_node or reference_image_node or video_output_node) and not run:
+        console.print("[red]错误: 视频与参考图片参数只能与 --run 一起使用[/red]")
         raise typer.Exit(1)
+    if (stop or release) and not instance:
+        console.print("[red]错误: 为避免操作错误实例，--stop / --release 时必须提供 --instance INSTANCE_ID[/red]")
+        raise typer.Exit(1)
+
+    if workflows:
+        try:
+            workflow_paths = _aigate_list_workflow_files(workflow_dir)
+        except AigateError as e:
+            console.print(f"[red]错误: {e}[/red]")
+            raise typer.Exit(1)
+        if not workflow_paths:
+            console.print("[yellow]工作流目录中没有 JSON 工作流[/yellow]")
+            return
+        table = Table(title="本地 ComfyUI 工作流")
+        table.add_column("文件")
+        table.add_column("完整路径")
+        for workflow_path in workflow_paths:
+            table.add_row(workflow_path.name, str(workflow_path))
+        console.print(table)
+        return
 
     if not aigate_token.strip():
         console.print("[red]错误: 未设置 AIGATE_TOKEN。请在 .env 中配置，或通过 --token 传入。[/red]")
         raise typer.Exit(1)
 
     try:
+        if gpus:
+            skus = _aigate_list_skus(aigate_token, area)
+            if not skus:
+                console.print("[yellow]未查询到可用 GPU SKU[/yellow]")
+            else:
+                table = Table(title="云扉可用 GPU SKU")
+                table.add_column("区域")
+                table.add_column("GPU SKU")
+                table.add_column("价格")
+                table.add_column("CPU")
+                table.add_column("内存")
+                table.add_column("最大 GPU 数")
+                for sku_info in skus:
+                    table.add_row(
+                        str(sku_info.get("areaName") or "-"),
+                        str(sku_info.get("skuName") or "-"),
+                        str(sku_info.get("price") or "-"),
+                        "{} 核 / {}".format(
+                            str(sku_info.get("cpuCore") or "-"),
+                            str(sku_info.get("cpuMf") or "-"),
+                        ),
+                        str(sku_info.get("memorySize") or "-"),
+                        str(sku_info.get("maxGpuCount") or "-"),
+                    )
+                console.print(table)
+
+        if images:
+            personal_images = _aigate_list_personal_images(aigate_token)
+            if not personal_images:
+                console.print("[yellow]当前账户没有个人镜像[/yellow]")
+            else:
+                table = Table(title="云扉个人镜像")
+                table.add_column("镜像 ID")
+                table.add_column("名称")
+                table.add_column("区域")
+                table.add_column("状态")
+                table.add_column("大小（字节）")
+                table.add_column("版本")
+                for image_info in personal_images:
+                    table.add_row(
+                        str(image_info.get("worksId") or "-"),
+                        str(image_info.get("name") or "未命名镜像"),
+                        str(image_info.get("areaName") or "-"),
+                        {"1": "可用", "2": "保存中", "3": "保存失败"}.get(
+                            str(image_info.get("status") or ""),
+                            str(image_info.get("status") or "未知"),
+                        ),
+                        str(image_info.get("size") or "-"),
+                        str(image_info.get("imageVersion") or "-"),
+                    )
+                console.print(table)
+
+        if community_images:
+            community = _aigate_list_community_images(
+                aigate_token, area or "", sku or "", image_name=""
+            )
+            if not community:
+                console.print("[yellow]未查询到社区镜像[/yellow]")
+            else:
+                table = Table(title="云扉社区镜像")
+                table.add_column("镜像 ID")
+                table.add_column("名称")
+                table.add_column("区域")
+                table.add_column("版本")
+                for image_info in community:
+                    table.add_row(
+                        str(image_info.get("worksId") or "-"),
+                        str(image_info.get("name") or "未命名镜像"),
+                        str(image_info.get("areaName") or "-"),
+                        str(image_info.get("imageVersion") or "-"),
+                    )
+                console.print(table)
+
+        if gpus or images or community_images:
+            return
+
         if stop:
             _aigate_control_instance(aigate_token, instance or "", "close")
             console.print(f"[green]已请求关闭云扉实例: {instance}[/green]")
+            return
+
+        if release:
+            _aigate_control_instance(aigate_token, instance or "", "release")
+            console.print(f"[green]已请求释放云扉实例: {instance}[/green]")
             return
 
         server_info = None
@@ -1486,6 +1617,11 @@ def aigate_cmd(
                 workflow or "",
                 server_info["base_url"],
                 image=image,
+                video=video,
+                reference_image=reference_image,
+                video_node=video_node,
+                reference_image_node=reference_image_node,
+                video_output_node=video_output_node,
                 prompt=prompt,
                 seed=seed,
                 output_dir=output,
