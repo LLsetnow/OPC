@@ -7,9 +7,41 @@ from pathlib import Path
 from unittest.mock import patch
 
 from opc_cli import aigate
+from opc_cli.scail import build_scail_workflow, unresolved_references
 
 
 class AigateTests(unittest.TestCase):
+    def test_build_scail_workflows_for_two_and_four_clips(self):
+        template_path = (
+            Path(__file__).resolve().parent.parent
+            / "workflows"
+            / "SCAIL2-3clips.json"
+        )
+        template = json.loads(template_path.read_text(encoding="utf-8"))
+
+        two_clips = build_scail_workflow(template, 2)
+        four_clips = build_scail_workflow(template, 4)
+
+        self.assertEqual(
+            len([node for node in two_clips.values() if node["class_type"] == "WanSCAILToVideo"]),
+            2,
+        )
+        self.assertEqual(two_clips["217"]["inputs"]["value"], 2)
+        self.assertEqual(two_clips["305"]["class_type"], "VHS_VideoCombine")
+        self.assertEqual(two_clips["305"]["inputs"]["images"], ["70", 0])
+        self.assertNotIn("88", two_clips)
+        self.assertEqual(unresolved_references(two_clips), set())
+
+        self.assertEqual(
+            len([node for node in four_clips.values() if node["class_type"] == "WanSCAILToVideo"]),
+            4,
+        )
+        self.assertEqual(four_clips["217"]["inputs"]["value"], 4)
+        self.assertEqual(four_clips["305"]["inputs"]["images"], ["312", 0])
+        self.assertEqual(four_clips["306"]["inputs"]["previous_frames"], ["264", 0])
+        self.assertEqual(four_clips["312"]["inputs"]["images.image0"], ["262", 0])
+        self.assertEqual(unresolved_references(four_clips), set())
+
     def test_normalize_bearer_token(self):
         self.assertEqual(aigate.normalize_bearer_token("Bearer secret"), "secret")
         self.assertEqual(aigate.normalize_bearer_token(" secret "), "secret")

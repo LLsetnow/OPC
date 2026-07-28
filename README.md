@@ -1,6 +1,6 @@
 # OPC CLI
 
-OPC 工具集命令行界面 —— B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + 本地/云扉 ComfyUI + AI日报。
+OPC 工具集命令行界面 —— B站视频转写、抖音 MP4 下载 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + 本地/云扉 ComfyUI + AI日报。
 
 ## 安装
 
@@ -31,6 +31,7 @@ cp .env.example .env
 ```
 opc                  显示帮助
 opc bili             B站视频下载 + ASR 转写 + 内容总结
+opc douyin           抖音视频下载为 MP4
 opc asr              语音识别：音频 → SRT/JSON 字幕
 opc tts              文字转语音（支持音色克隆）
 opc local-tts        本地语音合成 + 服务管理（Qwen3-TTS）
@@ -58,8 +59,9 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 | `IMAGE_API_KEY` / `IMAGE_MODEL` | 阿里云文生图，也作为 ASR/TTS/GPT-Img 回退 | Z-image |
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
 | `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
-| `YT_DLP_COOKIES` | B站 cookies 文件路径 | bili, bilimusic |
+| `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | bili, bilimusic, douyin |
 | `BILI_FOLDER` | bili 默认输出目录 | bili |
+| `DOUYIN_FOLDER` | douyin 默认输出目录 | douyin |
 | `NEWS_FOLDER` | news 默认输出目录 | news |
 | `COMFYUI_ROOT` | ComfyUI 根目录 | comfyui --start |
 | `AIGATE_TOKEN` | 云扉 Bearer Token | aigate |
@@ -121,6 +123,32 @@ opc bili "https://..." --cookies ./cookies.txt
 | `{title}.srt` | SRT 字幕文件 |
 | `{title}.asr.json` | ASR 原始结果（JSON） |
 | `{title}.md` | Markdown 内容总结（含视频时间线链接） |
+
+---
+
+## douyin — 抖音 MP4 下载
+
+下载单个抖音视频并保存为 MP4。优先保留原生 MP4 视频流和 M4A 音轨；其他可用流会由 ffmpeg 封装为 MP4，不会重新编码。
+
+```bash
+# 下载到 ./output
+opc douyin "https://www.douyin.com/video/7644571768053571003"
+
+# 指定输出目录
+opc douyin "https://www.douyin.com/video/7644571768053571003" -o ./videos
+
+# 登录可见或受限视频使用 cookies
+opc douyin "https://www.douyin.com/video/7644571768053571003" --cookies ./cookies.txt
+```
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `url` | | | 抖音视频链接 |
+| `--output-dir` | `-o` | `DOUYIN_FOLDER` 或 `./output` | 输出目录 |
+| `--cookies` | | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 |
+| `--env-file` | | | 自定义 `.env` 文件路径 |
+
+抖音的登录、年龄限制或反爬校验可能要求导出登录后的 cookies。请只下载有权保存或使用的视频。
 
 ---
 
@@ -869,11 +897,11 @@ pip install -e .
 
 GLM-TTS 单次请求限制 1024 字符，CLI 会自动分段合成拼接。如仍截断，请检查文本中是否有特殊字符影响分段。
 
-**Q: B站视频下载失败**
+**Q: 视频下载失败**
 
 - 确保安装了 `yt-dlp` 和 `ffmpeg`
 - 部分视频需要登录，使用 `--cookies` 参数提供 cookies 文件
-- 使用浏览器扩展 "Get cookies.txt LOCALLY" 导出 B站 cookies
+- 使用浏览器扩展 "Get cookies.txt LOCALLY" 导出相应站点的 cookies
 
 **Q: `local-tts` 报 `No module named 'torch'`**
 

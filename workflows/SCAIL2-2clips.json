@@ -362,32 +362,6 @@
       "title": "CLIP Text Encode (Prompt)"
     }
   },
-  "88": {
-    "inputs": {
-      "frame_rate": [
-        "156",
-        5
-      ],
-      "loop_count": 0,
-      "filename_prefix": "Wan21_SCAIL2",
-      "format": "video/h264-mp4",
-      "pix_fmt": "yuv420p",
-      "crf": 19,
-      "save_metadata": true,
-      "trim_to_audio": false,
-      "pingpong": false,
-      "save_output": false,
-      "no_preview": false,
-      "images": [
-        "104",
-        0
-      ]
-    },
-    "class_type": "VHS_VideoCombine",
-    "_meta": {
-      "title": "Video Combine 🎥🅥🅗🅢"
-    }
-  },
   "89": {
     "inputs": {
       "width": [
@@ -739,197 +713,11 @@
   },
   "217": {
     "inputs": {
-      "value": 3
+      "value": 2
     },
     "class_type": "PrimitiveInt",
     "_meta": {
       "title": "Video clips 视频片段数量"
-    }
-  },
-  "243": {
-    "inputs": {
-      "add_noise": true,
-      "noise_seed": [
-        "206",
-        0
-      ],
-      "cfg": 1,
-      "model": [
-        "95",
-        0
-      ],
-      "positive": [
-        "261",
-        0
-      ],
-      "negative": [
-        "261",
-        1
-      ],
-      "sampler": [
-        "27",
-        0
-      ],
-      "sigmas": [
-        "18",
-        0
-      ],
-      "latent_image": [
-        "261",
-        2
-      ]
-    },
-    "class_type": "SamplerCustom",
-    "_meta": {
-      "title": "SamplerCustom"
-    }
-  },
-  "260": {
-    "inputs": {
-      "method": "reinhard_lab",
-      "source_stats": "per_frame",
-      "strength": 1.0000000000000002,
-      "image_target": [
-        "265",
-        0
-      ],
-      "image_ref": [
-        "263",
-        0
-      ]
-    },
-    "class_type": "ColorTransfer",
-    "_meta": {
-      "title": "Transfer Color"
-    }
-  },
-  "261": {
-    "inputs": {
-      "width": [
-        "89",
-        1
-      ],
-      "height": [
-        "89",
-        2
-      ],
-      "length": [
-        "211",
-        0
-      ],
-      "batch_size": 1,
-      "pose_strength": 1,
-      "pose_start": 0,
-      "pose_end": 1,
-      "video_frame_offset": [
-        "115",
-        3
-      ],
-      "previous_frame_count": 5,
-      "replacement_mode": [
-        "199",
-        0
-      ],
-      "positive": [
-        "3",
-        0
-      ],
-      "negative": [
-        "4",
-        0
-      ],
-      "vae": [
-        "154",
-        0
-      ],
-      "pose_video": [
-        "89",
-        0
-      ],
-      "pose_video_mask": [
-        "104",
-        0
-      ],
-      "reference_image": [
-        "30",
-        0
-      ],
-      "reference_image_mask": [
-        "104",
-        1
-      ],
-      "clip_vision_output": [
-        "76",
-        0
-      ],
-      "previous_frames": [
-        "66",
-        0
-      ]
-    },
-    "class_type": "WanSCAILToVideo",
-    "_meta": {
-      "title": "WanSCAILToVideo"
-    }
-  },
-  "262": {
-    "inputs": {
-      "images.image0": [
-        "70",
-        0
-      ],
-      "images.image1": [
-        "260",
-        0
-      ]
-    },
-    "class_type": "BatchImagesNode",
-    "_meta": {
-      "title": "Batch Images"
-    }
-  },
-  "263": {
-    "inputs": {
-      "start_index": -1,
-      "num_frames": 1,
-      "images": [
-        "66",
-        0
-      ]
-    },
-    "class_type": "GetImageRangeFromBatch",
-    "_meta": {
-      "title": "Get Image or Mask Range From Batch"
-    }
-  },
-  "264": {
-    "inputs": {
-      "samples": [
-        "243",
-        0
-      ],
-      "vae": [
-        "154",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "265": {
-    "inputs": {
-      "start_index": 5,
-      "num_frames": 4096,
-      "images": [
-        "264",
-        0
-      ]
-    },
-    "class_type": "GetImageRangeFromBatch",
-    "_meta": {
-      "title": "Get Image or Mask Range From Batch"
     }
   },
   "266": {
@@ -959,16 +747,22 @@
   },
   "305": {
     "inputs": {
-      "fps": [
+      "frame_rate": [
         "156",
         5
       ],
-      "filename": "video/ComfyUI",
-      "auto_increment": true,
+      "loop_count": 0,
+      "filename_prefix": "Wan21_SCAIL2",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
       "save_output": true,
       "save_metadata": true,
-      "image": [
-        "262",
+      "trim_to_audio": false,
+      "pingpong": false,
+      "no_preview": false,
+      "images": [
+        "70",
         0
       ],
       "audio": [
@@ -976,9 +770,9 @@
         2
       ]
     },
-    "class_type": "1hew_SaveVideoByImage",
+    "class_type": "VHS_VideoCombine",
     "_meta": {
-      "title": "Save Video by Image"
+      "title": "Video Combine (SCAIL2)"
     }
   }
 }

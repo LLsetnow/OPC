@@ -18,6 +18,9 @@ dist/
 .env
 .env.local
 .env.*.local
+# 浏览器导出的登录会话 cookies，禁止提交。
+cookies.txt
+*_cookies.txt
 
 # ── IDE / 编辑器 ─────────────────────────────
 .obsidian/
@@ -36,7 +39,8 @@ models/
 *.bin
 *.onnx
 
-# ── 构建输出 ──────────────────────────────────
+# ── 本地输入与生成结果 ─────────────────────────
+input/
 output/
 *.wav
 *.mp3

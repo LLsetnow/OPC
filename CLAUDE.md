@@ -31,7 +31,8 @@
 | 云扉 AIGate 可用显卡 | `opc aigate --gpus [--area 区域]` | 查询当前账户可创建实例的 GPU SKU |
 | 云扉 AIGate 个人镜像 | `opc aigate --images` | 查询当前账户的个人镜像 |
 | 云扉 AIGate 本地工作流 | `opc aigate --workflows` | 列出仓库 `workflows/` 下的工作流 JSON |
-| 云扉 AIGate 工作流 | `opc aigate --run -w 工作流 -i 图片` | 向运行中的云端 ComfyUI 提交 API 格式工作流并下载结果 |
+| 云扉 AIGate 工作流 | `opc aigate --run --workflow 工作流` | 向运行中的云端 ComfyUI 提交 API 格式工作流并下载结果 |
+| 云扉 AIGate 停止任务 | `curl -X POST "$COMFYUI_URL/interrupt"` | 中断 ComfyUI 当前执行任务，随后查询 `/queue` 验证 |
 
 ### ComfyUI 工作流提交
 
@@ -59,14 +60,69 @@
 
 **工作流必须是 ComfyUI API 格式 JSON**：顶层键为节点 ID，节点包含 `class_type` 和 `inputs`。前端画布保存的 JSON（通常含有 `nodes`、`links`、`last_node_id` 等字段）不能直接通过 `--run` 提交；请在 ComfyUI 中导出 **API Format** JSON。
 
-**常用命令**：
+**资源操作**：
 
 ```bash
 # 查询云扉实例（状态 2 表示运行中）
 opc aigate --status
 
+# 查询可用 GPU 与个人镜像；仅在用户明确要求时创建计费实例
+opc aigate --gpus
+opc aigate --images
+
 # 启动指定的已有实例，等待 ComfyUI 就绪
 opc aigate --start --instance INSTANCE_ID
+```
+
+创建实例前必须确认 GPU、区域和个人镜像；不要因为提交工作流而隐式创建实例。除非用户明确要求，不停止或释放实例。
+
+**Qwen 单图编辑**：提交 `workflows/Qwen+单图编辑-api.json` 时，不需要读取、解析或修改完整 JSON。只需设置输入图片、输出目录与超时时间：
+
+```bash
+opc aigate --run --instance INSTANCE_ID \
+  --workflow "workflows/Qwen+单图编辑-api.json" \
+  --image "input/firstFrame/<首帧>.png" \
+  --output "output/aigate-qwen" \
+  --timeout 900
+```
+
+`--output` 是目录，完成后 CLI 会打印下载的 `ComfyUI_*.png` 路径。除非用户明确要求人工审核，否则直接将该路径作为 SCAIL-2 的 `--reference-image`，不需要执行 “Viewed Image”。不要使用会对真实人物造成裸体化、性化等不安全编辑的提示词；自定义提示词前先确认对应工作流节点能被 CLI 正确覆盖。
+
+**SCAIL-2 视频工作流选择**（输入强制为 16 fps）：
+
+| 视频时长 | 工作流 |
+|---|---|
+| ≤ 3 秒 | `workflows/SCAIL2-1clip.json` |
+| 3–6 秒 | `workflows/SCAIL2-2clips.json` |
+| 6–9 秒 | `workflows/SCAIL2-3clips.json` |
+| 9–12 秒 | `workflows/SCAIL2-4clips.json` |
+| > 12 秒 | `.venv/bin/python scripts/generate_scail_workflow.py N` |
+
+节点 217 只能调整已有片段的长度，不能增减推理分支。速度优先时可用 `N = max(1, ceil((16 × 秒数 - 5) / 45))` 估算片段数。1/2/4clip 可直接提交；原始 3clip 工作流须使用 `--video-output-node 305` 替换镜像缺失的视频保存节点：
+
+```bash
+opc aigate --run --instance INSTANCE_ID \
+  --workflow "workflows/SCAIL2-3clips.json" \
+  --video "input/videos/<视频>.mp4" \
+  --reference-image "output/aigate-qwen/<参考图>.png" \
+  --video-output-node 305 \
+  --output "output/aigate-scail" \
+  --timeout 1800
+```
+
+**监控与停止**：从 `opc aigate --start` 输出中取得 `COMFYUI_URL`。提交后读取日志；日志出现 `got prompt`、`tracking`、`3/6` 与 `Prompt executed in ... seconds` 表示正常推进。出现 `[ERROR]`、`CUDA out of memory`、`invalid prompt` 或缺失节点时，先修复再重试。
+
+```bash
+curl -sS "$COMFYUI_URL/internal/logs" | jq -r . | tail -n 50
+curl -sS "$COMFYUI_URL/queue"
+curl -sS -X POST "$COMFYUI_URL/interrupt"  # 中断当前任务
+```
+
+中断后必须再次查询 `/queue`，确认 `queue_running` 与 `queue_pending` 都为空。最终交付带音轨的 `ComfyUI_*-audio.mp4`；原始 3clip 的 `Wan21_SCAIL2_*.mp4` 是预览 / mask 视频。
+
+**其他示例**：
+
+```bash
 
 # 提交安全的 API 格式单图编辑工作流；图片和结果均在本地 Downloads 目录
 opc aigate --run \
