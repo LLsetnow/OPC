@@ -16,10 +16,11 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_news_folder, get_music_folder, _is_wsl
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_x_folder, get_news_folder, get_music_folder, _is_wsl
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
 from .bilimusic import run_bilimusic
 from .douyin import DouyinDownloadError, download_video as download_douyin_video
+from .x import XDownloadError, download_video as download_x_video
 from .music import run_music
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .local_tts import (
@@ -139,6 +140,39 @@ def douyin(
     try:
         output_path = download_douyin_video(url, output_dir, cookies)
     except DouyinDownloadError as error:
+        console.print(f"[red]错误: {error}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]完成![/green] 已保存 MP4: {output_path}")
+
+
+# ── x 子命令 ─────────────────────────────────────────────────────
+
+@app.command("x")
+def x(
+    url: str = typer.Argument(..., help="X (Twitter) 视频/帖子链接"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env X_FOLDER 读取，或 ./output）"),
+    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径（X 视频通常需要登录 cookies）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+):
+    """下载单个 X (Twitter) 视频为 MP4。
+
+    X 大量视频对未登录用户不可见。若报 "No video could be found"，
+    请用 --cookies 传入从浏览器导出的 cookies.txt（或设置环境变量 YT_DLP_COOKIES）。
+
+    示例:
+
+        opc x "https://x.com/i/status/2038177089082261736"
+
+        opc x "URL" --cookies ~/cookies.txt -o ~/Downloads
+    """
+    load_env(env_file)
+    output_dir = output_dir or get_x_folder() or "./output"
+    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
+
+    try:
+        output_path = download_x_video(url, output_dir, cookies)
+    except XDownloadError as error:
         console.print(f"[red]错误: {error}[/red]")
         raise typer.Exit(1)
 

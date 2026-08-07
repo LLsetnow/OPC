@@ -225,6 +225,11 @@ def get_douyin_folder() -> Optional[str]:
     return os.environ.get("DOUYIN_FOLDER")
 
 
+def get_x_folder() -> Optional[str]:
+    """获取 X (Twitter) 视频默认输出目录，未设置则返回 None"""
+    return os.environ.get("X_FOLDER")
+
+
 def get_music_folder() -> Optional[str]:
     """获取网易云音乐默认输出目录，未设置则返回 None"""
     return os.environ.get("MUSIC_FOLDER")

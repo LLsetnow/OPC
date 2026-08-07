@@ -1,4 +1,8 @@
-"""抖音 MP4 下载命令的离线单元测试。"""
+"""抖音 MP4 下载命令的离线单元测试。
+
+下载逻辑已抽取到 ``opc_cli._video``，因此涉及 subprocess / Finder 评注的桩
+都打在 ``opc_cli._video`` 上；这里验证抖音入口经由共享实现端到端可用。
+"""
 
 import os
 import subprocess
@@ -23,8 +27,8 @@ class DouyinDownloadTests(unittest.TestCase):
                 ["yt-dlp"], 0, stdout=f"{downloaded}\n", stderr=""
             )
 
-            with patch("opc_cli.douyin.subprocess.run", side_effect=[version, result]) as run, patch(
-                "opc_cli.douyin._write_finder_comment", return_value=False
+            with patch("opc_cli._video.subprocess.run", side_effect=[version, result]) as run, patch(
+                "opc_cli._video.write_finder_comment", return_value=False
             ):
                 path = douyin.download_video(
                     "https://www.douyin.com/video/123",
@@ -50,33 +54,11 @@ class DouyinDownloadTests(unittest.TestCase):
         self.assertTrue(comment_arg.endswith(":%(meta_comment)s"))
         self.assertEqual(command[-1], "https://www.douyin.com/video/123")
 
-    def test_write_finder_comment_skips_off_macos(self):
-        with patch("opc_cli.douyin.sys.platform", "linux"), patch(
-            "opc_cli.douyin.subprocess.run"
-        ) as run:
-            self.assertFalse(douyin._write_finder_comment("/tmp/video.mp4"))
-        run.assert_not_called()
-
-    def test_write_finder_comment_copies_embedded_comment_on_macos(self):
-        ffprobe = subprocess.CompletedProcess(
-            ["ffprobe"], 0, stdout="来源：url ｜ 作者：a ｜ 发布：2024-12-02\n", stderr=""
-        )
-        osascript = subprocess.CompletedProcess(["osascript"], 0, stdout="", stderr="")
-        with patch("opc_cli.douyin.sys.platform", "darwin"), patch(
-            "opc_cli.douyin.subprocess.run", side_effect=[ffprobe, osascript]
-        ) as run:
-            self.assertTrue(douyin._write_finder_comment("/tmp/video.mp4"))
-
-        osascript_call = run.call_args_list[1].args[0]
-        self.assertEqual(osascript_call[0], "osascript")
-        self.assertEqual(osascript_call[-2], "/tmp/video.mp4")
-        self.assertEqual(osascript_call[-1], "来源：url ｜ 作者：a ｜ 发布：2024-12-02")
-
     def test_download_video_surfaces_ytdlp_error(self):
         version = subprocess.CompletedProcess(["yt-dlp", "--version"], 0)
         failed = subprocess.CompletedProcess(["yt-dlp"], 1, stdout="", stderr="access denied")
         with tempfile.TemporaryDirectory() as temporary:
-            with patch("opc_cli.douyin.subprocess.run", side_effect=[version, failed]):
+            with patch("opc_cli._video.subprocess.run", side_effect=[version, failed]):
                 with self.assertRaisesRegex(douyin.DouyinDownloadError, "access denied"):
                     douyin.download_video("https://www.douyin.com/video/123", temporary)
 
