@@ -24,7 +24,6 @@
 | API连通性检查 | `opc check-api` | 检查.env中各API可用性 |
 | AI日报 | `opc news` | 自动收集AI新闻生成简报 |
 | 网易云音乐下载 | `opc music "URL"` | 下载网易云单曲/专辑/歌单 → MP3（含ID3元数据） |
-| X (Twitter) 视频下载 | `opc x "URL"` | 下载 X 视频为 MP4（视频通常需 `--cookies` 登录凭证） |
 | ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |
 | ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
 | ComfyUI指定工作流 | `opc comfyui --run -w 工作流 -i 图片 -p 提示词` | 指定工作流/提示词/种子/采样参数 |

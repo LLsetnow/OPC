@@ -12,8 +12,12 @@ from .config import get_llm_config, get_asr_config
 
 # ── Step 1: 下载 Bilibili 音频 ────────────────────────────────────
 
-def download_audio(url: str, output_dir: str, cookies: str = None) -> str:
-    """使用 yt-dlp 从 Bilibili 下载音频，返回音频文件路径"""
+def download_audio(url: str, output_dir: str, cookies: str = None, with_info: bool = False):
+    """使用 yt-dlp 从 Bilibili 下载音频。
+
+    默认只返回音频文件路径；需要将音频转换为 MP3 并写入元数据时，
+    通过 ``with_info=True`` 同时返回 yt-dlp 的视频信息。
+    """
     try:
         subprocess.run(["yt-dlp", "--version"], capture_output=True, check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -96,7 +100,118 @@ def download_audio(url: str, output_dir: str, cookies: str = None) -> str:
         raise FileNotFoundError(f"找不到下载的音频文件，请检查 {output_dir} 目录")
 
     print(f"音频已保存: {audio_path}")
+    if with_info:
+        return audio_path, info
     return audio_path
+
+
+def convert_to_mp3(input_path: str, output_path: str, bitrate: int = 192) -> str:
+    """使用 ffmpeg 将音频转为 MP3。"""
+    print(f"转换为 MP3 ({bitrate}kbps)...")
+
+    # yt-dlp 可能已经下载出 MP3。ffmpeg 不能安全地原地覆盖输入文件，
+    # 因此先写入临时文件，再替换目标文件。
+    same_file = os.path.abspath(input_path) == os.path.abspath(output_path)
+    actual_output = f"{output_path}.tmp.mp3" if same_file else output_path
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", input_path, "-vn", "-b:a", f"{bitrate}k", actual_output],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        if same_file and os.path.exists(actual_output):
+            os.remove(actual_output)
+        raise RuntimeError(f"MP3 转换失败: {result.stderr}")
+
+    if same_file:
+        os.replace(actual_output, output_path)
+    print(f"MP3 已保存: {output_path}")
+    return output_path
+
+
+def _download_cover(thumbnail_url: str, output_dir: str):
+    """下载封面图片，返回本地临时文件路径。"""
+    import requests
+
+    try:
+        resp = requests.get(thumbnail_url, timeout=30)
+        resp.raise_for_status()
+        cover_path = os.path.join(output_dir, "_cover_temp.jpg")
+        with open(cover_path, "wb") as f:
+            f.write(resp.content)
+        return cover_path
+    except Exception as e:
+        print(f"封面下载失败: {e}")
+        return None
+
+
+def embed_metadata(mp3_path: str, info: dict, cover_path: str = None):
+    """使用 mutagen 写入 MP3 的标题、UP主和封面。"""
+    try:
+        from mutagen.mp3 import MP3
+        from mutagen.id3 import ID3, TIT2, TPE1, APIC
+    except ImportError:
+        print("警告: mutagen 未安装，跳过元数据写入（pip install mutagen）")
+        return
+
+    audio = MP3(mp3_path, ID3=ID3)
+    if audio.tags is None:
+        audio.add_tags()
+
+    title = info.get("title", "")
+    if title:
+        audio.tags.add(TIT2(encoding=3, text=title))
+
+    uploader = info.get("uploader", "")
+    if uploader:
+        audio.tags.add(TPE1(encoding=3, text=uploader))
+
+    if cover_path and os.path.exists(cover_path):
+        try:
+            with open(cover_path, "rb") as f:
+                cover_data = f.read()
+            mime = "image/png" if cover_path.lower().endswith(".png") else "image/jpeg"
+            audio.tags.add(
+                APIC(encoding=3, mime=mime, type=3, desc="Cover", data=cover_data)
+            )
+        except Exception as e:
+            print(f"封面嵌入失败: {e}")
+
+    audio.save()
+    print("ID3 元数据已写入")
+
+
+def save_audio_as_mp3(
+    audio_path: str,
+    info: dict,
+    output_dir: str,
+    bitrate: int = 192,
+    no_metadata: bool = False,
+) -> str:
+    """将下载或已有的音频保存为带可选元数据的 MP3。"""
+    safe_title = re.sub(r'[<>:"/\\|?*]', "_", info.get("title", "unknown"))
+    mp3_path = os.path.join(output_dir, f"{safe_title}.mp3")
+    convert_to_mp3(audio_path, mp3_path, bitrate=bitrate)
+
+    if os.path.abspath(audio_path) != os.path.abspath(mp3_path) and os.path.exists(audio_path):
+        os.remove(audio_path)
+        print(f"已清理原始文件: {os.path.basename(audio_path)}")
+
+    if not no_metadata:
+        cover_path = None
+        thumbnail = info.get("thumbnail", "")
+        if thumbnail:
+            cover_path = _download_cover(thumbnail, output_dir)
+        try:
+            embed_metadata(mp3_path, info, cover_path=cover_path)
+        finally:
+            if cover_path and os.path.exists(cover_path):
+                os.remove(cover_path)
+
+    file_size = os.path.getsize(mp3_path) / 1024 / 1024
+    print("\n===== 完成 =====")
+    print(f"  MP3 文件: {mp3_path}")
+    print(f"  文件大小: {file_size:.1f} MB")
+    return mp3_path
 
 
 # ── Step 2: ASR 语音识别 ──────────────────────────────────────────
@@ -776,8 +891,10 @@ def run_bili(
     skip_asr: bool = False,
     asr_file: str = None,
     llm_fix: bool = False,
+    bitrate: int = 192,
+    no_metadata: bool = False,
 ):
-    """B站视频转写主流程
+    """B站视频转写主流程，或在 ``audio_only`` 模式下导出 MP3。
 
     自动检测：确定了视频目录后，若该目录下已有字幕文件则自动跳过 ASR。
     """
@@ -805,11 +922,22 @@ def run_bili(
         print(f"使用已有音频文件: {audio_path}")
     else:
         cookies = cookies or os.environ.get("YT_DLP_COOKIES")
-        audio_path = download_audio(url, output_dir, cookies=cookies)
+        if audio_only:
+            audio_path, info = download_audio(url, output_dir, cookies=cookies, with_info=True)
+        else:
+            audio_path = download_audio(url, output_dir, cookies=cookies)
 
     if audio_only:
-        print("仅下载音频模式，跳过后续步骤")
-        return audio_path
+        if skip_download:
+            # 跳过下载时没有 yt-dlp 元数据，至少用文件名作为标题继续转换。
+            info = {"title": Path(audio_path).stem}
+        return save_audio_as_mp3(
+            audio_path,
+            info,
+            output_dir,
+            bitrate=bitrate,
+            no_metadata=no_metadata,
+        )
 
     # 创建视频同名子目录，将音频移入
     audio_base = Path(audio_path).stem

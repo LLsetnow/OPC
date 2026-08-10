@@ -18,7 +18,6 @@ if sys.platform == "win32":
 
 from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_x_folder, get_news_folder, get_music_folder, _is_wsl
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
-from .bilimusic import run_bilimusic
 from .douyin import DouyinDownloadError, download_video as download_douyin_video
 from .x import XDownloadError, download_video as download_x_video
 from .music import run_music
@@ -89,7 +88,9 @@ def bili(
     url: str = typer.Argument("", help="Bilibili 视频链接（--skip-download 时可省略）"),
     output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env BILI_FOLDER 读取，或 ./output）"),
     cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
-    audio_only: bool = typer.Option(False, "--audio-only", help="仅下载音频，不进行 ASR"),
+    audio_only: bool = typer.Option(False, "--audio-only", help="下载音频并转为 MP3，不进行 ASR"),
+    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps，仅 --audio-only 生效)"),
+    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 MP3 的 ID3 元数据写入（仅 --audio-only 生效）"),
     skip_download: bool = typer.Option(False, "--skip-download", help="跳过下载，使用已有音频文件"),
     audio_file: Optional[str] = typer.Option(None, "--audio-file", help="指定已有音频文件路径"),
     skip_asr: bool = typer.Option(False, "--skip-asr", help="跳过 ASR，使用已有字幕文件生成总结"),
@@ -120,6 +121,8 @@ def bili(
         skip_asr=skip_asr,
         asr_file=asr_file,
         llm_fix=llm_fix,
+        bitrate=bitrate,
+        no_metadata=no_metadata,
     )
 
 
@@ -177,37 +180,6 @@ def x(
         raise typer.Exit(1)
 
     console.print(f"[green]完成![/green] 已保存 MP4: {output_path}")
-
-
-# ── bilimusic 子命令 ───────────────────────────────────────────────
-
-@app.command("bilimusic")
-def bilimusic(
-    url: str = typer.Argument(..., help="Bilibili 视频链接"),
-    output_dir: str = typer.Option("./output", "-o", "--output-dir", help="输出目录"),
-    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps)"),
-    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 ID3 元数据写入"),
-    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
-):
-    """B站视频音频下载 → 转为 MP3（带 ID3 元数据）
-
-    下载视频最佳音频轨道，转为 MP3 格式，自动写入标题、UP主、封面等 ID3 标签。
-
-    示例:
-
-        opc bilimusic "https://www.bilibili.com/video/BV1xx"
-
-        opc bilimusic "URL" -o ./music --bitrate 320
-
-        opc bilimusic "URL" --no-metadata
-    """
-    run_bilimusic(
-        url=url,
-        output_dir=output_dir,
-        bitrate=bitrate,
-        no_metadata=no_metadata,
-        cookies=cookies,
-    )
 
 
 # ── music 子命令 ───────────────────────────────────────────────
@@ -1459,9 +1431,11 @@ def aigate_cmd(
     image_type: Optional[str] = typer.Option(None, "--image-type", help="云扉镜像类型：2=社区，3=个人（默认读取 AIGATE_IMAGE_TYPE）"),
     workflow: Optional[str] = typer.Option(None, "-w", "--workflow", help="ComfyUI API 格式工作流 JSON（--run 时必填）"),
     image: Optional[str] = typer.Option(None, "-i", "--image", help="上传到云端 ComfyUI 的输入图片"),
-    video: Optional[str] = typer.Option(None, "--video", help="上传到云端 ComfyUI 的输入视频（自动写入 VHS_LoadVideo 节点）"),
+    video: Optional[str] = typer.Option(None, "--video", help="上传到云端 ComfyUI 的输入视频（自动写入 VHS_LoadVideo / LoadVideo 节点）"),
+    audio: Optional[str] = typer.Option(None, "--audio", help="上传到云端 ComfyUI 的输入音频（自动写入 LoadAudio 节点）"),
     reference_image: Optional[str] = typer.Option(None, "--reference-image", help="参考角色图片（自动写入 LoadImage 节点）"),
-    video_node: Optional[str] = typer.Option(None, "--video-node", help="VHS_LoadVideo 节点 ID（覆盖自动检测）"),
+    video_node: Optional[str] = typer.Option(None, "--video-node", help="视频加载节点 ID（VHS_LoadVideo / LoadVideo，覆盖自动检测）"),
+    audio_node: Optional[str] = typer.Option(None, "--audio-node", help="音频加载节点 ID（LoadAudio，覆盖自动检测）"),
     reference_image_node: Optional[str] = typer.Option(None, "--reference-image-node", help="参考图片 LoadImage 节点 ID（覆盖自动检测）"),
     video_output_node: Optional[str] = typer.Option(None, "--video-output-node", help="临时替换为 VHS_VideoCombine 的视频输出节点 ID"),
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="提示词（自动识别 prompt/text 节点）"),
@@ -1519,8 +1493,8 @@ def aigate_cmd(
     if run and not workflow:
         console.print("[red]错误: --run 时必须通过 -w/--workflow 指定工作流 JSON[/red]")
         raise typer.Exit(1)
-    if (video or reference_image or video_node or reference_image_node or video_output_node) and not run:
-        console.print("[red]错误: 视频与参考图片参数只能与 --run 一起使用[/red]")
+    if (video or audio or reference_image or video_node or audio_node or reference_image_node or video_output_node) and not run:
+        console.print("[red]错误: 视频、音频与参考图片参数只能与 --run 一起使用[/red]")
         raise typer.Exit(1)
     if (stop or release) and not instance:
         console.print("[red]错误: 为避免操作错误实例，--stop / --release 时必须提供 --instance INSTANCE_ID[/red]")
@@ -1676,8 +1650,10 @@ def aigate_cmd(
                 server_info["base_url"],
                 image=image,
                 video=video,
+                audio=audio,
                 reference_image=reference_image,
                 video_node=video_node,
+                audio_node=audio_node,
                 reference_image_node=reference_image_node,
                 video_output_node=video_output_node,
                 prompt=prompt,

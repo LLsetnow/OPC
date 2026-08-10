@@ -59,7 +59,7 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 | `IMAGE_API_KEY` / `IMAGE_MODEL` | 阿里云文生图，也作为 ASR/TTS/GPT-Img 回退 | Z-image |
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
 | `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
-| `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | bili, bilimusic, douyin |
+| `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | bili, douyin |
 | `BILI_FOLDER` | bili 默认输出目录 | bili |
 | `DOUYIN_FOLDER` | douyin 默认输出目录 | douyin |
 | `NEWS_FOLDER` | news 默认输出目录 | news |
@@ -82,8 +82,12 @@ opc bili "https://www.bilibili.com/video/BV1xx"
 # 指定输出目录
 opc bili "https://..." -o ./my_output
 
-# 仅下载音频，不做转写
+# 仅下载音频并转为 MP3（带 ID3 元数据）
 opc bili "https://..." --audio-only
+
+# 指定 MP3 比特率，或跳过元数据写入
+opc bili "https://..." --audio-only --bitrate 320
+opc bili "https://..." --audio-only --no-metadata
 
 # 跳过下载，从 output 目录自动查找已有音频文件
 opc bili --skip-download
@@ -108,7 +112,9 @@ opc bili "https://..." --cookies ./cookies.txt
 | `url` | | | Bilibili 视频链接（`--skip-download` 时可省略） |
 | `--output-dir` | `-o` | `./output` | 输出目录 |
 | `--cookies` | | | yt-dlp cookies 文件路径 |
-| `--audio-only` | | `false` | 仅下载音频，不进行 ASR |
+| `--audio-only` | | `false` | 下载音频并转为 MP3，不进行 ASR |
+| `--bitrate` | | `192` | MP3 比特率（仅 `--audio-only` 生效） |
+| `--no-metadata` | | `false` | 跳过 MP3 的 ID3 元数据写入（仅 `--audio-only` 生效） |
 | `--skip-download` | | `false` | 跳过下载，从 output-dir 自动查找音频 |
 | `--audio-file` | | | 手动指定已有音频文件路径 |
 | `--skip-asr` | | `false` | 跳过 ASR，从 output-dir 自动查找字幕文件 |
@@ -120,6 +126,7 @@ opc bili "https://..." --cookies ./cookies.txt
 | 文件 | 说明 |
 |---|---|
 | `{title}.m4a` | 下载的音频文件 |
+| `{title}.mp3` | `--audio-only` 模式生成的 MP3（默认含标题、UP主和封面） |
 | `{title}.srt` | SRT 字幕文件 |
 | `{title}.asr.json` | ASR 原始结果（JSON） |
 | `{title}.md` | Markdown 内容总结（含视频时间线链接） |
