@@ -33,6 +33,7 @@ opc                  显示帮助
 opc bili             B站视频下载 + ASR 转写 + 内容总结
 opc douyin           抖音视频下载为 MP4
 opc asr              语音识别：音频 → SRT/JSON 字幕
+opc audio            音乐理解：使用 Qwen3-Omni Captioner 分析音频
 opc tts              文字转语音（支持音色克隆）
 opc local-tts        本地语音合成 + 服务管理（Qwen3-TTS）
 opc read-img         图片理解：使用视觉模型分析图片内容
@@ -56,6 +57,7 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 | `QWEN_TTS_API_KEY` / `QWEN_TTS_MODEL` / `VOICE_ID1/2` | 阿里云 CosyVoice TTS（默认引擎） | tts (默认) |
 | `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL` | 视觉模型（图片理解/UI 分析） | read-img, ui2vue |
 | `DASHSCOPE_API_KEY` / `ASR_API_KEY` / `ASR_MODEL` | 阿里云 ASR 语音识别 | asr, bili |
+| `ALIYUN_API_KEY` / `AUDIO_MODEL` | 阿里云 Qwen3-Omni 音乐理解 | audio |
 | `IMAGE_API_KEY` / `IMAGE_MODEL` | 阿里云文生图，也作为 ASR/TTS/GPT-Img 回退 | Z-image |
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
 | `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
@@ -420,6 +422,34 @@ opc read-img ui.png -p "每个控件的相对位置和像素大小是什么"
 
 - 单张图片最大 **10MB**，超出时自动压缩（WebP → JPEG → 缩放）
 - API 配置优先级：`VISION_API_KEY` > `ZHIPU_API_KEY` > `LLM_API_KEY`
+
+---
+
+## audio — 音乐理解
+
+使用阿里云 `qwen3-omni-30b-a3b-captioner` 分析本地音频，自动描述曲风、乐器、音色、情绪、氛围和段落结构。API Key 从 `.env` 的 `ALIYUN_API_KEY` 读取。
+
+### 使用范例
+
+```bash
+# 直接输出音乐分析
+opc audio Hypervoid.m4a
+
+# 保存分析结果
+opc audio Hypervoid.m4a -o Hypervoid.analysis.txt
+
+# 覆盖默认模型
+opc audio Hypervoid.m4a --model qwen3-omni-30b-a3b-captioner
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `audio` | | | 输入音频路径（支持 `.wav/.mp3/.m4a/.mp4/.webm/.ogg/.opus/.mov/.mkv`） |
+| `--output` | `-o` | 终端输出 | 将分析结果保存到文本文件 |
+| `--model` | | `.env` 中的 `AUDIO_MODEL` | 音乐理解模型，默认 `qwen3-omni-30b-a3b-captioner` |
+| `--env-file` | | | 自定义 `.env` 文件路径 |
 
 ---
 
@@ -859,6 +889,7 @@ opc_cli/
 ├── config.py       # 共享配置（环境变量、API Key）
 ├── logger.py       # 日志系统（TeeWriter 双输出）
 ├── bili.py         # B站视频下载 + ASR 转写 + 内容总结
+├── audio.py        # Qwen3-Omni 音乐理解
 ├── tts.py          # GLM-TTS 语音合成 + 音色克隆
 ├── local_tts.py    # Qwen3-TTS 本地语音合成
 ├── tts_server.py   # TTS 常驻服务（Flask）
@@ -882,6 +913,7 @@ opc_cli/
 - **zhipuai** — 智谱 ASR 语音识别
 - **yt-dlp** — B站视频下载
 - **soundfile** + **numpy** — 音频分片处理
+- **dashscope** — 阿里云 Qwen3-Omni 音乐理解 / ASR / TTS API
 - **Pillow** — 图片压缩处理
 
 ## 常见问题
