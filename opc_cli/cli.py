@@ -1,4 +1,4 @@
-"""OPC CLI 入口：B站视频转写 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + AI日报 + 文生图"""
+"""OPC CLI 入口：B站视频转写 + 音乐理解 + 语音合成 + 图片理解 + 文生图"""
 
 import os
 import sys
@@ -18,6 +18,7 @@ if sys.platform == "win32":
 
 from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_x_folder, get_news_folder, get_music_folder, _is_wsl
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
+from .audio import AudioUnderstandingError, analyze_audio
 from .douyin import DouyinDownloadError, download_video as download_douyin_video
 from .x import XDownloadError, download_video as download_x_video
 from .music import run_music
@@ -74,7 +75,7 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 音乐下载 + 语音合成 + 图片理解 + UI转Vue + 文生图 + ComfyUI + 云扉 AIGate",
+    help="OPC 工具集：B站视频转写 + 音乐理解 + 音乐下载 + 语音合成 + 图片理解 + UI转Vue + 文生图 + ComfyUI + 云扉 AIGate",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -293,6 +294,37 @@ def asr(
     console.print(f"\n[green]完成![/green]")
     console.print(f"  SRT:  {srt_path}")
     console.print(f"  JSON: {json_path}")
+
+
+# ── audio 子命令 ──────────────────────────────────────────────────
+
+@app.command("audio")
+def audio_cmd(
+    audio: str = typer.Argument(..., help="输入音频文件路径（.wav/.mp3/.m4a 等）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="将分析结果保存到文本文件"),
+    model: str = typer.Option("", "--model", help="音乐理解模型（默认读取 .env AUDIO_MODEL，默认为 qwen3-omni-30b-a3b-captioner）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """音乐理解：使用 Qwen3-Omni Captioner 分析本地音频。"""
+    load_env(env_file)
+
+    audio_path = Path(audio)
+    console.print("[bold]=== 音乐理解 ===[/bold]")
+    console.print(f"输入: {audio_path}")
+
+    try:
+        result = analyze_audio(str(audio_path), model=model)
+
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(result + "\n", encoding="utf-8")
+            console.print(f"结果已保存: {output_path}")
+    except (AudioUnderstandingError, OSError) as error:
+        console.print(f"[red]错误: {error}[/red]")
+        raise typer.Exit(1)
+
+    console.print("\n" + result)
 
 
 # ── tts 子命令 ────────────────────────────────────────────────────

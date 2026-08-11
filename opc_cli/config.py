@@ -131,6 +131,19 @@ def get_asr_config() -> tuple:
     return api_key, model
 
 
+def get_audio_config() -> tuple:
+    """获取音乐理解配置，返回 (api_key, model)。"""
+    api_key = os.environ.get("ALIYUN_API_KEY", "")
+    model = os.environ.get("AUDIO_MODEL", "qwen3-omni-30b-a3b-captioner")
+
+    if not api_key:
+        print("错误: 未设置 ALIYUN_API_KEY 环境变量")
+        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_dashscope_api_key")
+        sys.exit(1)
+
+    return api_key, model
+
+
 def get_qwen_tts_config() -> tuple:
     """
     获取阿里云 Qwen TTS（CosyVoice）API 配置，返回 (api_key, model)。
