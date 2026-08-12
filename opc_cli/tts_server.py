@@ -243,7 +243,7 @@ class TTSHandler(BaseHTTPRequestHandler):
             self._serve_player()
         elif self.path == "/llm-config":
             self._send_json(200, {
-                "api_key": os.environ.get("LLM_API_KEY", ""),
+                "api_key": os.environ.get("DEEPSEEK_API_KEY", ""),
                 "base_url": os.environ.get("LLM_BASE_URL", ""),
                 "model": os.environ.get("LLM_MODEL", ""),
             })
@@ -441,7 +441,7 @@ def start_server(mode: str = "custom", device: str = "cuda:0", attn: str = "sdpa
     """Start the TTS server. Set no_load=True to skip model loading."""
     global _server_instance
 
-    # 加载 .env 环境变量（LLM_API_KEY 等）
+    # 加载 .env 环境变量（DEEPSEEK_API_KEY 等）
     from .config import load_env
     load_env()
 
@@ -878,12 +878,12 @@ async def _ws_chat_handler(websocket):
                 model = _model_cache[mode]
 
             # 读取 LLM 配置
-            llm_api_key = os.environ.get("LLM_API_KEY", "")
+            llm_api_key = os.environ.get("DEEPSEEK_API_KEY", "")
             llm_base_url = os.environ.get("LLM_BASE_URL", "")
             llm_model = os.environ.get("LLM_MODEL", "")
 
             if not llm_api_key or not llm_base_url:
-                await websocket.send(json.dumps({"type": "error", "error": "LLM_API_KEY 或 LLM_BASE_URL 未配置"}))
+                await websocket.send(json.dumps({"type": "error", "error": "DEEPSEEK_API_KEY 或 LLM_BASE_URL 未配置"}))
                 continue
 
             # 发送流信息

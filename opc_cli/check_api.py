@@ -2,6 +2,7 @@
 
 import os
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 import requests
@@ -29,14 +30,166 @@ class CheckResult:
         self.latency_ms = latency_ms
 
 
+@dataclass(frozen=True)
+class CommandAvailability:
+    """描述一个 opc 命令在当前环境中的可用程度。"""
+
+    command: str
+    status: str
+    required: str
+    detail: str
+
+    @property
+    def available(self) -> bool:
+        """命令至少有一种可用模式。"""
+        return self.status != "不可用"
+
+
+def _configured_key(*names: str) -> tuple[str, str]:
+    """返回第一个已配置的环境变量名和值，不暴露 key 内容。"""
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return name, value
+    return "", ""
+
+
+def _key_source(*names: str) -> str:
+    """返回第一个已配置的 key 名称。"""
+    return _configured_key(*names)[0]
+
+
+def get_command_availability() -> list[CommandAvailability]:
+    """根据当前环境变量，列出每个 opc 命令的可用程度。
+
+    这里仅检查配置是否存在，不会发起网络请求，也不会输出 API key 的内容。
+    ``部分可用`` 表示命令仍有无需该凭证或使用其他引擎的模式。
+    """
+    deepseek_source = _key_source("DEEPSEEK_API_KEY")
+    zhipu_source = _key_source("ZHIPU_API_KEY")
+    vision_source = zhipu_source
+    asr_source = _key_source("ALIYUN_API_KEY")
+    image_source = asr_source
+    qwen_tts_source = asr_source
+    audio_source = _key_source("ALIYUN_API_KEY")
+    gpt_image_source = _key_source("GPT_IMAGE_API_KEY")
+    aigate_source = _key_source("AIGATE_TOKEN")
+    comfyui_source = _key_source("COMFYUI_ROOT")
+
+    full_bili = bool(asr_source and deepseek_source)
+    bili_missing = []
+    if not asr_source:
+        bili_missing.append("ALIYUN")
+    if not deepseek_source:
+        bili_missing.append("DEEPSEEK")
+
+    tts_modes = bool(qwen_tts_source), bool(zhipu_source)
+    if all(tts_modes):
+        tts_status = "可用"
+        tts_detail = "Qwen TTS 默认引擎 + GLM-TTS 引擎均可用"
+    elif any(tts_modes):
+        tts_status = "部分可用"
+        tts_detail = "仅可用 " + ("Qwen TTS" if qwen_tts_source else "GLM-TTS") + " 引擎"
+    else:
+        tts_status = "不可用"
+        tts_detail = "未配置 ALIYUN_API_KEY 或 ZHIPU_API_KEY"
+
+    gpt_status = "不可用" if not gpt_image_source else "可用" if deepseek_source else "部分可用"
+    gpt_detail = (
+        "Qwen Image 文生图/编辑和 DeepSeek 提示词增强均可用"
+        if gpt_image_source and deepseek_source
+        else "可使用 --no-enhance 文生图或编辑；缺少 DeepSeek 提示词增强"
+        if gpt_image_source
+        else "缺少 GPT_IMAGE_API_KEY"
+    )
+    image_status = "不可用" if not image_source else "可用" if deepseek_source else "部分可用"
+    image_detail = (
+        "文生图和 DeepSeek 提示词增强均可用"
+        if image_source and deepseek_source
+        else "可使用 --no-enhance 生成图片；缺少 DeepSeek 提示词增强"
+        if image_source
+        else "缺少 ALIYUN_API_KEY"
+    )
+
+    return [
+        CommandAvailability(
+            "bili",
+            "可用" if full_bili else "部分可用",
+            "ALIYUN + DEEPSEEK（完整流程）",
+            "完整下载→转写→总结流程可用"
+            if full_bili
+            else f"可用音频下载/导出；完整流程缺少 {', '.join(bili_missing)}",
+        ),
+        CommandAvailability("douyin", "可用", "无需 API Key", "视频下载可用"),
+        CommandAvailability("x", "可用", "无需 API Key", "视频下载可用"),
+        CommandAvailability("music", "可用", "无需 API Key", "音乐下载可用"),
+        CommandAvailability(
+            "asr",
+            "可用" if asr_source else "不可用",
+            "ALIYUN_API_KEY",
+            f"使用 {asr_source}" if asr_source else "缺少 ALIYUN_API_KEY",
+        ),
+        CommandAvailability(
+            "audio",
+            "可用" if audio_source else "不可用",
+            "ALIYUN_API_KEY",
+            f"使用 {audio_source}" if audio_source else "缺少 ALIYUN_API_KEY",
+        ),
+        CommandAvailability(
+            "tts",
+            tts_status,
+            "ALIYUN_API_KEY 或 ZHIPU_API_KEY",
+            tts_detail,
+        ),
+        CommandAvailability("local-tts", "可用", "无需 API Key", "使用本地 Qwen3-TTS 模型"),
+        CommandAvailability(
+            "read-img",
+            "可用" if vision_source else "不可用",
+            "ZHIPU_API_KEY",
+            f"使用 {vision_source}" if vision_source else "缺少 ZHIPU_API_KEY",
+        ),
+        CommandAvailability(
+            "gpt-img",
+            gpt_status,
+            "GPT_IMAGE_API_KEY；DEEPSEEK_API_KEY 可选",
+            gpt_detail,
+        ),
+        CommandAvailability(
+            "image",
+            image_status,
+            "ALIYUN_API_KEY；DEEPSEEK_API_KEY 可选",
+            image_detail,
+        ),
+        CommandAvailability(
+            "comfyui",
+            "可用" if comfyui_source else "部分可用",
+            "--start 需要 COMFYUI_ROOT",
+            "可查看/控制已运行服务；--start 缺少 COMFYUI_ROOT"
+            if not comfyui_source
+            else f"使用 {comfyui_source} 启动本地服务",
+        ),
+        CommandAvailability(
+            "aigate",
+            "可用" if aigate_source else "部分可用",
+            "AIGATE_TOKEN（--workflows 除外）",
+            f"使用 {aigate_source}" if aigate_source else "仅本地 --workflows 可用；缺少 AIGATE_TOKEN",
+        ),
+        CommandAvailability("news", "可用" if deepseek_source else "不可用", "DEEPSEEK_API_KEY", f"使用 {deepseek_source}" if deepseek_source else "缺少 DEEPSEEK_API_KEY"),
+        CommandAvailability("check-api", "可用", "无需 API Key", "配置检查和连通性检查可用"),
+    ]
+
+
 # ── 各 API 检查函数 ──────────────────────────────────────────────
 
 def check_llm() -> CheckResult:
     """测试 LLM API（发送最简短请求）"""
+    if not _key_source("DEEPSEEK_API_KEY"):
+        return CheckResult("DeepSeek (LLM)", False, "未配置 DEEPSEEK_API_KEY")
+
     try:
         api_key, base_url, model = get_llm_config()
     except SystemExit:
-        return CheckResult("LLM", False, "未配置 LLM_API_KEY")
+        return CheckResult("DeepSeek (LLM)", False, "未配置 DEEPSEEK_API_KEY")
 
     t0 = time.time()
     try:
@@ -48,14 +201,17 @@ def check_llm() -> CheckResult:
         )
         latency = int((time.time() - t0) * 1000)
         content = resp.choices[0].message.content or ""
-        return CheckResult("LLM", True, f"model={model} url={base_url} resp={content[:30]}", latency)
+        return CheckResult("DeepSeek (LLM)", True, f"model={model} url={base_url} resp={content[:30]}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
-        return CheckResult("LLM", False, f"{type(e).__name__}: {e}", latency)
+        return CheckResult("DeepSeek (LLM)", False, f"{type(e).__name__}: {e}", latency)
 
 
 def check_zhipu() -> CheckResult:
     """测试智谱 TTS API（列出音色）"""
+    if not _key_source("ZHIPU_API_KEY"):
+        return CheckResult("ZhiPu (TTS)", False, "未配置 ZHIPU_API_KEY")
+
     try:
         api_key, base_url = get_api_config()
     except SystemExit:
@@ -83,11 +239,14 @@ def check_zhipu() -> CheckResult:
 
 def check_asr() -> CheckResult:
     """测试阿里云 DashScope ASR API（验证 key 有效性）"""
+    if not _key_source("ALIYUN_API_KEY"):
+        return CheckResult("ASR (DashScope)", False, "未配置 ALIYUN_API_KEY")
+
     try:
         from .config import get_asr_config
         api_key, model = get_asr_config()
     except SystemExit:
-        return CheckResult("ASR (DashScope)", False, "未配置 IMAGE_API_KEY 或 ASR_API_KEY")
+        return CheckResult("ASR (DashScope)", False, "未配置 ALIYUN_API_KEY")
 
     t0 = time.time()
     try:
@@ -110,10 +269,13 @@ def check_asr() -> CheckResult:
 
 def check_vision() -> CheckResult:
     """测试视觉模型 API（发送最简短文本请求验证连通性）"""
+    if not _key_source("ZHIPU_API_KEY"):
+        return CheckResult("Vision", False, "未配置 ZHIPU_API_KEY")
+
     try:
         api_key, base_url, model = get_vision_config()
     except SystemExit:
-        return CheckResult("Vision", False, "未配置 VISION_API_KEY")
+        return CheckResult("Vision", False, "未配置 ZHIPU_API_KEY")
 
     t0 = time.time()
     try:
@@ -134,10 +296,13 @@ def check_vision() -> CheckResult:
 
 def check_image() -> CheckResult:
     """测试阿里云百炼文生图 API（用最小请求验证 key 有效性）"""
+    if not _key_source("ALIYUN_API_KEY"):
+        return CheckResult("Image (DashScope)", False, "未配置 ALIYUN_API_KEY")
+
     try:
         api_key, model = get_image_config()
     except SystemExit:
-        return CheckResult("Image (DashScope)", False, "未配置 IMAGE_API_KEY")
+        return CheckResult("Image (DashScope)", False, "未配置 ALIYUN_API_KEY")
 
     t0 = time.time()
     try:
@@ -173,6 +338,9 @@ def check_image() -> CheckResult:
 
 def check_gpt_image() -> CheckResult:
     """测试 GPT-Image API（验证 key 和 base_url 连通性，自动使用代理）"""
+    if not _key_source("GPT_IMAGE_API_KEY"):
+        return CheckResult("GPT-Image", False, "未配置 GPT_IMAGE_API_KEY")
+
     try:
         api_key, base_url, model = get_gpt_image_config()
     except SystemExit:
@@ -199,6 +367,51 @@ def check_gpt_image() -> CheckResult:
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
         return CheckResult("GPT-Image", False, f"{type(e).__name__}: {e}", latency)
+
+
+def _check_dashscope_key(
+    name: str,
+    api_key: str,
+    model: str,
+) -> CheckResult:
+    """通过 DashScope 模型列表接口检查一个服务共用的 API key。"""
+    t0 = time.time()
+    try:
+        url = "https://dashscope.aliyuncs.com/api/v1/models"
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+        latency = int((time.time() - t0) * 1000)
+        if resp.status_code == 200:
+            return CheckResult(name, True, f"model={model} key_ok", latency)
+        if resp.status_code == 401:
+            return CheckResult(name, False, f"认证失败 (401) model={model}", latency)
+        return CheckResult(name, True, f"model={model} key_probably_ok (HTTP {resp.status_code})", latency)
+    except Exception as e:
+        latency = int((time.time() - t0) * 1000)
+        return CheckResult(name, False, f"{type(e).__name__}: {e}", latency)
+
+
+def check_audio() -> CheckResult:
+    """测试阿里云 Qwen3-Omni 音乐理解 API。"""
+    if not _key_source("ALIYUN_API_KEY"):
+        return CheckResult("Audio (Qwen3-Omni)", False, "未配置 ALIYUN_API_KEY")
+
+    from .config import get_audio_config
+    api_key, model = get_audio_config()
+    return _check_dashscope_key("Audio (Qwen3-Omni)", api_key, model)
+
+
+def check_qwen_tts() -> CheckResult:
+    """测试阿里云 CosyVoice TTS API。"""
+    if not _key_source("ALIYUN_API_KEY"):
+        return CheckResult("Qwen TTS (DashScope)", False, "未配置 ALIYUN_API_KEY")
+
+    from .config import get_qwen_tts_config
+    api_key, model = get_qwen_tts_config()
+    return _check_dashscope_key("Qwen TTS (DashScope)", api_key, model)
 
 
 def check_proxy() -> CheckResult:
@@ -243,8 +456,11 @@ def check_cookies() -> CheckResult:
 # 可用的 API 名称 → 检查函数
 CHECK_MAP: dict[str, callable] = {
     "llm": check_llm,
+    "deepseek": check_llm,
     "zhipu": check_zhipu,
     "asr": check_asr,
+    "audio": check_audio,
+    "qwen-tts": check_qwen_tts,
     "vision": check_vision,
     "image": check_image,
     "gpt-image": check_gpt_image,
@@ -258,7 +474,7 @@ def run_check_api(env_file: Optional[str] = None, only: Optional[list[str]] = No
 
     Args:
         env_file: .env 文件路径
-        only: 只检查指定 API，如 ["llm", "vision"]；为 None 则检查全部
+        only: 只检查指定 API，如 ["deepseek", "vision"]；为 None 则检查全部
     """
     load_env(env_file)
 
@@ -276,7 +492,11 @@ def run_check_api(env_file: Optional[str] = None, only: Optional[list[str]] = No
                 raise ValueError(console_msg)
         checks = selected
     else:
-        checks = list(CHECK_MAP.values())
+        # ``llm`` 是 ``deepseek`` 的兼容别名，避免全量检查重复请求同一个 API。
+        checks = []
+        for check_fn in CHECK_MAP.values():
+            if check_fn not in checks:
+                checks.append(check_fn)
 
     results = []
     for check_fn in checks:

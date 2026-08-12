@@ -50,9 +50,8 @@ from .tts_server import (
     DEFAULT_PORT as _TTS_DEFAULT_PORT,
 )
 from .vision import understand_image
-from .ui2vue import ui2vue, save_vue_files, setup_vue_project
 from .ai_daily import run_ai_daily
-from .check_api import run_check_api
+from .check_api import get_command_availability, run_check_api
 from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
 from .aigate import (
     AigateError,
@@ -69,7 +68,7 @@ from .aigate import (
     submit_workflow as _aigate_submit_workflow,
     wait_for_comfyui as _aigate_wait_for_comfyui,
 )
-from .text2img import generate_image, download_image, enhance_prompt, RECOMMENDED_SIZES
+from .text2img import generate_image, download_image, enhance_prompt
 from .gpt_image import (
     submit_and_wait as _gpt_submit_and_wait,
     enhance_prompt as _gpt_enhance_prompt,
@@ -81,7 +80,7 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 音乐理解 + 音乐下载 + 语音合成 + 图片理解 + UI转Vue + 文生图 + ComfyUI + 云扉 AIGate",
+    help="OPC 工具集：B站视频转写 + 音乐理解 + 音乐下载 + 语音合成 + 图片理解 + 文生图/图像编辑 + ComfyUI + 云扉 AIGate",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -406,7 +405,11 @@ def tts(
     使用 --list-voices 查看系统音色，--list-cloned 查看克隆音色。
     """
     load_env(env_file)
-    api_key, base_url = get_api_config()
+    # Qwen TTS 直接使用 ALIYUN_API_KEY；智谱凭证只在 GLM-TTS、音色列表
+    # 或音色克隆等智谱功能需要时读取。
+    api_key = base_url = ""
+    if engine == "glm-tts" or list_voices or list_cloned or clone:
+        api_key, base_url = get_api_config()
 
     # 列出音色
     if list_voices or list_cloned:
@@ -956,127 +959,6 @@ def img(
         console.print("=" * 50)
 
 
-# ── ui2vue 子命令 ──────────────────────────────────────────────────
-
-UI_FRAMEWORKS = ["default", "element-plus", "ant-design-vue", "naive-ui", "vuetify", "tailwind", "pure"]
-
-
-@app.command("ui2vue")
-def ui2vue_cmd(
-    image: str = typer.Argument("", help="UI 界面截图路径或 URL（使用 --analysis 时可省略）"),
-    framework: str = typer.Option("default", "-f", "--framework", help=f"UI 框架: {'/'.join(UI_FRAMEWORKS)}"),
-    component: str = typer.Option("", "-c", "--component", help="组件名称（如 UserProfile）"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出目录或 .vue 文件路径"),
-    project_name: str = typer.Option("vue-app", "-p", "--project", help="Vue 项目名称（步骤3创建工程时使用）"),
-    vision_model: str = typer.Option("", "--vision-model", help="视觉模型名称（用于分析 UI，默认读取 VISION_MODEL 环境变量）"),
-    llm_model: str = typer.Option("", "--llm-model", help="LLM 模型名称（用于生成代码，默认读取 LLM_MODEL 环境变量）"),
-    max_tokens: int = typer.Option(16384, "--max-tokens", help="最大输出 token 数"),
-    temperature: float = typer.Option(0.3, "--temperature", help="生成温度 0-1"),
-    max_retries: int = typer.Option(3, "--max-retries", help="步骤3 最大自动修复重试次数"),
-    analysis: str = typer.Option("", "--analysis", help="已有的 UI 分析 md 文件路径（提供后跳过步骤1，直接使用已有分析结果）"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-    save_vue: bool = typer.Option(True, "--save-vue/--no-save-vue", help="是否自动提取并保存 .vue 文件"),
-    create_project: bool = typer.Option(True, "--create-project/--no-create-project", help="是否创建 Vue 工程并自动修复（步骤3）"),
-):
-    """UI截图转Vue：视觉分析 → 生成Vue代码 → 创建工程并自动修复
-
-    使用 --analysis 可跳过步骤1，直接使用已有的分析结果生成代码。
-    """
-    load_env(env_file)
-
-    if not analysis and not image:
-        console.print("[red]错误: 必须提供 image 参数或 --analysis 文件路径[/red]")
-        raise typer.Exit(1)
-
-    if framework not in UI_FRAMEWORKS:
-        console.print(f"[red]错误: 不支持的 UI 框架 '{framework}'[/red]")
-        console.print(f"可选: {', '.join(UI_FRAMEWORKS)}")
-        raise typer.Exit(1)
-
-    ui_description, vue_result, setup_result = ui2vue(
-        image=image,
-        framework=framework,
-        component_name=component,
-        output=output or ".",
-        project_name=project_name,
-        vision_model=vision_model,
-        llm_model=llm_model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        max_retries=max_retries,
-        create_project=create_project,
-        analysis_file=analysis,
-    )
-
-    # 保存文件（优先，避免终端编码中断导致文件未保存）
-    comp_name = component or "GeneratedComponent"
-    saved_files = []
-
-    if save_vue and not create_project:
-        # 仅在未创建工程时手动保存 .vue 文件（创建工程时步骤3已自动保存）
-        if output:
-            output_path = Path(output)
-            if output_path.suffix == ".vue":
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                from .ui2vue import _extract_vue_code
-                vue_code = _extract_vue_code(vue_result)
-                with open(str(output_path), "w", encoding="utf-8") as f:
-                    f.write(vue_code)
-                saved_files.append(str(output_path))
-            else:
-                saved = save_vue_files(vue_result, str(output_path), comp_name)
-                saved_files.extend([str(output_path / f) for f in saved])
-        else:
-            saved = save_vue_files(vue_result, ".", comp_name)
-            saved_files.extend(saved)
-
-    # 保存完整分析报告
-    md_path = None
-    if output:
-        output_path = Path(output)
-        if create_project:
-            # 报告放在项目目录下
-            md_path = output_path / project_name / "analysis.md"
-        elif output_path.suffix == ".vue":
-            md_path = output_path.with_suffix(".md")
-        else:
-            md_path = output_path / "analysis.md"
-        md_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(md_path), "w", encoding="utf-8") as f:
-            f.write(f"# UI 截图分析\n\n框架: {framework}\n\n## UI 结构分析\n\n{ui_description}\n\n---\n\n## 生成的 Vue 代码\n\n{vue_result}")
-            if setup_result:
-                f.write(f"\n\n---\n\n## 工程构建结果\n\n")
-                f.write(f"- 项目路径: {setup_result['project_path']}\n")
-                f.write(f"- 构建成功: {'是' if setup_result['success'] else '否'}\n")
-                f.write(f"- 修复重试次数: {setup_result['retries']}\n")
-                if not setup_result['success']:
-                    for i, err in enumerate(setup_result['errors']):
-                        f.write(f"\n### 错误 {i+1}\n\n```\n{err}\n```\n")
-
-    # 步骤1和步骤2已在 ui2vue() 中实时打印，这里只输出步骤3的最终构建结果
-    if setup_result:
-        try:
-            console.print("\n[bold yellow]== 步骤3: 工程构建结果 ==[/bold yellow]")
-            if setup_result['success']:
-                console.print(f"[green]构建成功！[/green] 项目路径: {setup_result['project_path']}")
-                console.print(f"  修复重试: {setup_result['retries']} 次")
-            else:
-                console.print(f"[red]构建失败[/red]，重试 {setup_result['retries']} 次后仍未通过")
-                console.print(f"  项目路径: {setup_result['project_path']}")
-                console.print("  请手动检查错误或增加 --max-retries")
-        except UnicodeEncodeError:
-            print("\n[终端编码限制，完整内容请查看日志文件]")
-
-    if saved_files:
-        for f in saved_files:
-            print(f"[已保存] {f}")
-    if setup_result and setup_result['saved_files']:
-        for f in setup_result['saved_files']:
-            print(f"[组件已保存] {f}")
-    if md_path:
-        print(f"[分析报告] {md_path}")
-
-
 # ── gpt-img 子命令 ──────────────────────────────────────────────
 
 @app.command("gpt-img")
@@ -1232,45 +1114,43 @@ def gpt_img(
     console.print(f"[dim]URL: {image_url}[/dim]")
 
 
-# ── Z-image 子命令 ──────────────────────────────────────────────
+# ── image 子命令 ─────────────────────────────────────────────────
 
-@app.command("Z-image")
-def text2img(
-    prompt: str = typer.Argument(help="提示词（中英文，描述期望生成的图像）"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/text2img_<时间戳>.png）"),
+@app.command("image")
+def image_cmd(
+    prompt: str = typer.Argument(help="提示词或图像编辑指令"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/image_<时间戳>.png）"),
     size: str = typer.Option("2:3", "-s", "--size", help="输出分辨率：宽*高（如 1024*1536）或宽高比（如 2:3, 16:9）"),
-    model: str = typer.Option("z-image-turbo", "--model", help="模型名称"),
-    enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 LLM 丰富提示词（默认开启）"),
-    prompt_extend: bool = typer.Option(False, "--prompt-extend", help="启用 z-image 智能提示词改写（会增加响应时间和费用）"),
+    model: str = typer.Option("", "--model", help="模型名称（默认读取 .env IMAGE_MODEL，默认为 qwen-image-3.0）"),
+    image: Optional[list[str]] = typer.Option(None, "-i", "--image", help="编辑输入图片路径、URL 或 data URI，可重复指定，最多 3 张"),
+    negative_prompt: Optional[str] = typer.Option(None, "--negative-prompt", help="负向提示词"),
+    n: int = typer.Option(1, "--n", help="生成张数（1~6）"),
+    enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 DeepSeek 丰富提示词（默认开启）"),
+    prompt_extend: bool = typer.Option(True, "--prompt-extend/--no-prompt-extend", help="启用 Qwen Image 智能提示词改写（默认开启）"),
     seed: Optional[int] = typer.Option(None, "--seed", help="随机种子（0~2147483647）"),
+    watermark: bool = typer.Option(False, "--watermark/--no-watermark", help="是否添加水印"),
     no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """文生图：使用阿里云 z-image-turbo 根据提示词生成图片
+    """使用阿里云 Qwen Image 3.0 进行文生图或图像编辑。
 
-    默认使用 LLM (LLM_MODEL) 丰富提示词，可用 --no-enhance 关闭。
-
-    分辨率格式：宽*高（如 512*512）或宽高比（如 2:3, 16:9）
-
-    常用宽高比：1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9
-
-    默认输出 2:3 竖图 (1024*1536)，总像素范围 [512*512, 2048*2048]
+    不提供 --image 时执行文生图；提供 1~3 张 --image 时执行图像编辑。
+    默认使用 DeepSeek 丰富提示词，可通过 --no-enhance 关闭。
     """
     load_env(env_file)
     api_key, cfg_model = get_image_config()
+    use_model = model or cfg_model
+    editing = bool(image)
 
-    # 命令行 model 优先
-    use_model = model if model != "z-image-turbo" else cfg_model
-
-    console.print(f"[bold]=== 文生图 (z-image-turbo) ===[/bold]")
+    console.print(f"[bold]=== {'图像编辑' if editing else '文生图'} (Qwen Image 3.0) ===[/bold]")
     console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
     console.print(f"分辨率: {size} | 模型: {use_model}")
+    if image:
+        console.print(f"参考图: {len(image)} 张")
 
-    # 使用 LLM 丰富提示词
     use_prompt = prompt
-    use_prompt_json = None
     if enhance:
-        console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
+        console.print("\n[cyan]🧠 使用 DeepSeek 丰富提示词...[/cyan]")
         try:
             llm_key, llm_url, llm_model = get_llm_config()
             enhanced = enhance_prompt(
@@ -1281,19 +1161,13 @@ def text2img(
                 aspect_ratio=size,
             )
             use_prompt = enhanced["flat"]
-            use_prompt_json = enhanced["json_str"]
             console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
             console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
         except Exception as e:
-            console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
+            console.print(f"[yellow]⚠ DeepSeek 丰富失败，使用原始提示词: {e}[/yellow]")
 
-    if prompt_extend:
-        console.print("[cyan]z-image 智能提示词改写: 已开启[/cyan]")
-
-    # 生成图片
     import time
     t0 = time.time()
-
     try:
         result = generate_image(
             prompt=use_prompt,
@@ -1302,6 +1176,10 @@ def text2img(
             model=use_model,
             prompt_extend=prompt_extend,
             seed=seed,
+            images=image,
+            negative_prompt=negative_prompt,
+            n=n,
+            watermark=watermark,
         )
     except ValueError as e:
         console.print(f"[red]参数错误: {e}[/red]")
@@ -1311,38 +1189,40 @@ def text2img(
         raise typer.Exit(1)
 
     elapsed = time.time() - t0
-    image_url = result.get("image_url")
-
-    if not image_url:
+    image_urls = result.get("image_urls") or []
+    if not image_urls and result.get("image_url"):
+        image_urls = [result["image_url"]]
+    if not image_urls:
         console.print("[red]未获取到图片 URL[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s) {result.get('width')}*{result.get('height')}")
-
+    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s) {result.get('width')}*{result.get('height')}，共 {len(image_urls)} 张")
     if result.get("text") and prompt_extend:
         console.print(f"[dim]改写后提示词: {result['text'][:200]}[/dim]")
 
-    # 输出
     if no_download:
-        console.print(f"\n图片 URL: {image_url}")
+        for index, image_url in enumerate(image_urls, 1):
+            console.print(f"\n图片 URL {index}: {image_url}")
         console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
-    else:
-        # 生成默认路径
-        if not output:
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            output = f"output/text2img_{ts}.png"
+        return
 
-        try:
-            saved = download_image(image_url, output)
+    if not output:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        output = f"output/image_{ts}.png"
+
+    try:
+        for index, image_url in enumerate(image_urls, 1):
+            save_path = output
+            if len(image_urls) > 1:
+                output_path = Path(output)
+                save_path = str(output_path.with_name(f"{output_path.stem}_{index}{output_path.suffix or '.png'}"))
+            saved = download_image(image_url, save_path)
             file_size = Path(saved).stat().st_size
             console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
-        except Exception as e:
-            console.print(f"[red]下载失败: {e}[/red]")
-            console.print(f"图片 URL（有效期 24 小时）: {image_url}")
-            raise typer.Exit(1)
-
-    # 输出 URL（方便复制）
-    console.print(f"[dim]URL: {image_url}[/dim]")
+            console.print(f"[dim]URL {index}: {image_url}[/dim]")
+    except Exception as e:
+        console.print(f"[red]下载失败: {e}[/red]")
+        raise typer.Exit(1)
 
 
 # ── check-api 子命令 ──────────────────────────────────────────────
@@ -1350,17 +1230,46 @@ def text2img(
 @app.command("check-api")
 def check_api(
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-    only: Optional[list[str]] = typer.Option(None, "--only", help="只检查指定 API，可多次使用。如 --only llm --only vision"),
+    only: Optional[list[str]] = typer.Option(None, "--only", help="只检查指定 API，可多次使用。如 --only deepseek --only vision"),
 ):
-    """检查 .env 中 API 的连通性和密钥有效性
+    """检查 API 连通性，并显示当前可用的 opc 命令。
 
-    可用 API 名称: llm, zhipu, vision, image, gpt-image, proxy, cookies
+    可用 API 名称: deepseek (或 llm), zhipu, asr, audio, qwen-tts, vision, image, gpt-image, proxy, cookies
 
     示例:
       opc check-api                # 检查全部
-      opc check-api --only llm     # 只检查 LLM
-      opc check-api --only llm --only vision  # 检查 LLM 和 Vision
+      opc check-api --only deepseek     # 只检查 DeepSeek
+      opc check-api --only deepseek --only vision  # 检查 DeepSeek 和 Vision
     """
+    # 可用性表也依赖 .env，必须在读取环境变量前加载配置。
+    load_env(env_file)
+    console.print("[bold]=== OPC 命令可用性 ===[/bold]\n")
+
+    availability = get_command_availability()
+    availability_table = Table(show_header=True, header_style="bold")
+    availability_table.add_column("命令", style="cyan", width=14)
+    availability_table.add_column("状态", width=10)
+    availability_table.add_column("配置依据", width=42)
+    availability_table.add_column("说明")
+
+    status_styles = {
+        "可用": "[green]可用[/green]",
+        "部分可用": "[yellow]部分可用[/yellow]",
+        "不可用": "[red]不可用[/red]",
+    }
+    available_count = 0
+    for item in availability:
+        availability_table.add_row(
+            f"opc {item.command}",
+            status_styles.get(item.status, item.status),
+            item.required,
+            item.detail,
+        )
+        if item.available:
+            available_count += 1
+
+    console.print(availability_table)
+    console.print(f"可用命令: [green]{available_count}[/green]/{len(availability)}\n")
     console.print("[bold]=== API 连通性检查 ===[/bold]\n")
 
     try:
@@ -1790,7 +1699,7 @@ def ai_daily(
     """AI 日报：自动收集当日 AI 技术/科研/项目新闻，LLM 整合输出专业简报
 
     信息来源：36氪、虎嗅、IT之家、InfoQ（RSS）、GitHub、Arxiv
-    使用 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 配置大模型
+    使用 DEEPSEEK_API_KEY / LLM_BASE_URL / LLM_MODEL 配置大模型
 
     --json 模式：LLM 直接输出结构化 JSON，无需 markdown 解析，适合 CI/CD 集成
     """

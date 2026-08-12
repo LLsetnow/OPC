@@ -1,9 +1,9 @@
-"""阿里云百炼 z-image-turbo 文生图"""
+"""阿里云 Qwen Image 3.0 文生图与图像编辑"""
 
-import os
-import time
+import base64
+import mimetypes
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import requests
 from openai import OpenAI
@@ -81,7 +81,7 @@ def enhance_prompt(
 
     Returns:
         dict: {
-            "flat": "逗号拼接的扁平提示词（用于 text2img 等）",
+            "flat": "逗号拼接的扁平提示词（用于 image 等）",
             "json_str": "完整 JSON 字符串（用于 GPT-Image 等支持结构化 prompt 的 API）",
             "json_dict": {"prompt": {...}} 原始 dict
         }
@@ -135,11 +135,15 @@ def generate_image(
     prompt: str,
     api_key: str,
     size: Optional[str] = None,
-    model: str = "z-image-turbo",
-    prompt_extend: bool = False,
+    model: str = "qwen-image-3.0",
+    prompt_extend: bool = True,
     seed: Optional[int] = None,
+    images: Optional[Sequence[str]] = None,
+    negative_prompt: Optional[str] = None,
+    n: int = 1,
+    watermark: bool = False,
 ) -> dict:
-    """调用 z-image-turbo 生成图片
+    """调用 Qwen Image 3.0 进行文生图或图像编辑。
 
     Args:
         prompt: 正向提示词（中英文，≤800字符）
@@ -148,12 +152,24 @@ def generate_image(
         model: 模型名称
         prompt_extend: 是否启用智能提示词改写
         seed: 随机种子
+        images: 参考图路径、URL 或 data URI；传入后进入图像编辑模式
+        negative_prompt: 负向提示词
+        n: 输出图片数量，范围 1~6
+        watermark: 是否添加水印
 
     Returns:
-        dict: 包含 image_url, text, width, height 等信息
+        dict: 包含 image_url、image_urls、text、width、height 等信息
     """
-    # 解析 size 参数
+    if not 1 <= n <= 6:
+        raise ValueError("n 必须在 1 到 6 之间")
+
+    image_refs = [encode_image_reference(image) for image in (images or [])]
+    if len(image_refs) > 3:
+        raise ValueError("Qwen Image 3.0 最多支持 3 张参考图")
+
     actual_size = _resolve_size(size)
+    content = [{"image": image} for image in image_refs]
+    content.append({"text": prompt[:800]})
 
     # 构建请求体
     body = {
@@ -162,16 +178,20 @@ def generate_image(
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"text": prompt[:800]}],  # 截断超长提示词
+                    "content": content,
                 }
             ]
         },
         "parameters": {
             "size": actual_size,
             "prompt_extend": prompt_extend,
+            "n": n,
+            "watermark": watermark,
         },
     }
 
+    if negative_prompt:
+        body["parameters"]["negative_prompt"] = negative_prompt
     if seed is not None:
         body["parameters"]["seed"] = seed
 
@@ -182,6 +202,7 @@ def generate_image(
     }
 
     resp = requests.post(IMAGE_API_URL, json=body, headers=headers, timeout=120)
+    resp.raise_for_status()
     data = resp.json()
 
     # 检查错误
@@ -198,24 +219,46 @@ def generate_image(
     message = choices[0].get("message", {})
     content = message.get("content", [])
 
-    image_url = None
+    image_urls = []
     text_out = ""
     for item in content:
         if "image" in item:
-            image_url = item["image"]
+            image_urls.append(item["image"])
         if "text" in item:
             text_out = item["text"]
 
     usage = data.get("usage", {})
 
     return {
-        "image_url": image_url,
+        "image_url": image_urls[0] if image_urls else None,
+        "image_urls": image_urls,
         "text": text_out,
         "width": usage.get("width", 0),
         "height": usage.get("height", 0),
         "size": actual_size,
         "request_id": data.get("request_id", ""),
     }
+
+
+def encode_image_reference(image: str) -> str:
+    """将本地图片、公开 URL 或 data URI 转为 API 可接受的引用。"""
+    if image.startswith(("http://", "https://", "data:image/")):
+        return image
+
+    image_path = Path(image).expanduser()
+    if not image_path.is_file():
+        raise ValueError(f"输入图片不存在: {image}")
+
+    file_size = image_path.stat().st_size
+    if file_size > 10 * 1024 * 1024:
+        raise ValueError(f"输入图片超过 10MB 限制: {image}")
+
+    mime_type, _ = mimetypes.guess_type(image_path.name)
+    if not mime_type or not mime_type.startswith("image/"):
+        raise ValueError(f"无法识别图片格式: {image}")
+
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def download_image(url: str, save_path: str) -> str:
