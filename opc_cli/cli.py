@@ -1643,9 +1643,6 @@ def aigate_cmd(
         server_info = None
         if start:
             if create:
-                existing = _aigate_list_instances(aigate_token)
-                if existing:
-                    raise AigateError("云扉控制台已有实例，为避免重复计费，不能创建新实例。")
                 created = _aigate_create_instance(
                     aigate_token,
                     sku or os.environ.get("AIGATE_SKU_NAME", ""),

@@ -67,7 +67,7 @@ class AigateTests(unittest.TestCase):
         )
 
     @patch("opc_cli.aigate._aigate_json")
-    def test_list_instances_reads_all_pages_before_creation_safety_check(self, request):
+    def test_list_instances_reads_all_pages(self, request):
         request.side_effect = [
             {"records": [{"instanceId": "one"}] * 20, "total": 21},
             {"records": [{"instanceId": "two"}], "total": 21},
