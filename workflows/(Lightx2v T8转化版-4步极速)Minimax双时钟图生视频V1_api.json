@@ -1,0 +1,357 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "2": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_4step_v0.1_comfyui_alpha8-T8-convert.safetensors",
+      "strength_model": 1,
+      "model": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderBypassModelOnly",
+    "_meta": {
+      "title": "lora only"
+    }
+  },
+  "3": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "4": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "5": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "6": {
+    "inputs": {
+      "prompt": [
+        "36",
+        0
+      ],
+      "width": [
+        "16",
+        0
+      ],
+      "height": [
+        "16",
+        1
+      ],
+      "length": [
+        "15",
+        1
+      ],
+      "task_type": "auto",
+      "audio_mode": "lock_source",
+      "audio_denoise_strength": 1,
+      "add_source_as_reference": false,
+      "prompt_primary_audio_ordinal": 0,
+      "strict_prompt_tags": true,
+      "ref_image_size": "match",
+      "reference_video_policy": "official_2_to_15s",
+      "clip": [
+        "3",
+        0
+      ],
+      "video_vae": [
+        "4",
+        0
+      ],
+      "audio_vae": [
+        "5",
+        0
+      ],
+      "drive_audio": [
+        "45",
+        2
+      ],
+      "ref_images.ref_image_0": [
+        "37",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "45",
+        0
+      ],
+      "ref_video_audios.ref_video_audio_0": [
+        "45",
+        2
+      ]
+    },
+    "class_type": "MiniMaxH3AudioConditioningT8",
+    "_meta": {
+      "title": "MiniMax H3 Audio Conditioning (T8)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "steps": 4,
+      "shift_video": 12,
+      "shift_audio": 3,
+      "model": [
+        "2",
+        0
+      ],
+      "av_latent": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "MiniMaxH3DualClockSamplerT8",
+    "_meta": {
+      "title": "STABLE 4 video / 4 audio"
+    }
+  },
+  "8": {
+    "inputs": {
+      "model": [
+        "7",
+        0
+      ],
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "Basic Guider"
+    }
+  },
+  "9": {
+    "inputs": {
+      "noise_seed": 575029984620997
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "10": {
+    "inputs": {
+      "noise": [
+        "9",
+        0
+      ],
+      "guider": [
+        "8",
+        0
+      ],
+      "sampler": [
+        "7",
+        1
+      ],
+      "sigmas": [
+        "7",
+        2
+      ],
+      "latent_image": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "11": {
+    "inputs": {
+      "av_latent": [
+        "10",
+        0
+      ],
+      "video_vae": [
+        "4",
+        0
+      ],
+      "audio_vae": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3AVDecodeT8",
+    "_meta": {
+      "title": "MiniMax H3 AV Decode (T8)"
+    }
+  },
+  "12": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "MiniMaxH3/stable_4v4a",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "no_preview": false,
+      "images": [
+        "11",
+        0
+      ],
+      "audio": [
+        "11",
+        1
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "14": {
+    "inputs": {
+      "value": 10
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (duration)"
+    }
+  },
+  "15": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "16": {
+    "inputs": {
+      "aspect_ratio": "9:16 (Portrait Widescreen)",
+      "megapixels": 0.9,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector"
+    }
+  },
+  "17": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Memory Efficient Sage Attention Patch"
+    }
+  },
+  "36": {
+    "inputs": {
+      "prompt": "保存原视频全部动作，特效，运镜，镜头角度，场景，将视频画面中间的人物换为图1，肢体比例正常，画面流畅，色调和音频和原视频一致"
+    },
+    "class_type": "CR Prompt Text",
+    "_meta": {
+      "title": "⚙️ CR Prompt Text"
+    }
+  },
+  "37": {
+    "inputs": {
+      "image": "95078c8870a4ea22b9285d089d59f137e24a5463149ba7e11811d470d2f01994.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "41": {
+    "inputs": {
+      "audio": "fee64d073c4227d8511277361098dbd8fcb5692cf1f1e035a743061e95f49cc0.mp3",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Audio"
+    }
+  },
+  "45": {
+    "inputs": {
+      "video": "6f1156910488df309d7725809dd320b56763ea0fcd6b3f92355d5ddf3078fed2.mp4",
+      "force_rate": 0,
+      "force_size": "Disabled",
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 240,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "AnimateDiff"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video (Upload) 🎥🅥🅗🅢"
+    }
+  },
+  "51": {
+    "inputs": {
+      "prompt": "subject_definitions:\n<Subject 1> 是偶像少女千夏，完整外观(脸/发型/妆容/服装/身型)全部来自 <Picture 1>（角色参考图），保持不变。\n<Subject 2> 是户外沙滩演出舞台场景，来自 <Picture 2>（背景图）：沙滩上的露天舞台，海浪、沙地与舞台结构可见。\n<Audio 1> 是 <Subject 1> (S1) 的音色参考（一位年轻女声）；仅借音色、生成新台词，不复制原信号。\n\nsummary:\n[reference generation + audio reference] 目标视频为 16:9 横屏：<Subject 1>（外观取自 <Picture 1>）站在 <Subject 2>（来自 <Picture 2>）的沙滩露天舞台上，先用 <Audio 1> 的音色说一句中文开场白，随后切到特写、开始跳舞。\n\nretention_analysis:\n<Subject 1>（出现在 [Shot 1]、[Shot 2]）：fully_preserved —— <Picture 1> 的脸/发型/妆容/服装/身型全部保留，仅姿态随说话与舞蹈变化。\n<Subject 2>（出现在 [Shot 1]）：fully_preserved —— <Picture 2> 的沙滩露天舞台场景作为背景环境保留；特写镜头会收窄到人物。\n<Audio 1>：reference —— 仅作 <Subject 1> 的音色参考，台词为新生成，不复制原音频。\n\ndetailed_description:\n以 <Picture 1> 的画风渲染，<Subject 1> 无缝合成进 <Picture 2> 的沙滩露天舞台场景，16:9 横屏、暖调午后阳光。[Shot 1] 中景，<Subject 1> 站在舞台中央，身后是 <Subject 2> 的沙滩、海浪与舞台结构，海风吹动她的头发与衣摆。她抬手朝镜头轻轻挥手，用取自 <Audio 1> 的年轻女声音色，<Subject 1> (S1) 略带羞涩又活泼地说：<d>[Chinese] 那个，我是妄想天使的千夏</d>，说完把手收到脸颊旁比了个小爱心、歪头一笑。[Shot 2] 在 00:03.500，镜头切到 <Subject 1> 上半身特写：她笑意加深，舞台音箱随即响起轻快的偶像流行曲，她跟着节拍起舞——手臂挥摆、肩部律动、头点拍点、转身与俏皮手势，发丝与衣摆随动作自然甩动，直到约 10.00 秒。镜头在特写内带轻微手持晃动并随她的律动小幅移动，保持她居中。无字幕无水印。\n\noverall_soundscape:\n持续的海浪拍岸声与海风声，远处偶有海鸟鸣叫；她在舞台上的轻脚步与转身时的衣物摩擦声。\n\nnon_diegetic_music:\nN/A —— 舞蹈音乐来自舞台音箱(diegetic，已在描述中，由模型生成)。"
+    },
+    "class_type": "CR Prompt Text",
+    "_meta": {
+      "title": "⚙️ CR Prompt Text"
+    }
+  },
+  "52": {
+    "inputs": {
+      "audio": "32e928b64088eafb89cc7071aadaaba8cb8eba614e18f76c2a8f6814a447a18b.mp3",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Audio"
+    }
+  },
+  "53": {
+    "inputs": {
+      "start_index": 0,
+      "duration": 10.000000000000002,
+      "audio": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "TrimAudioDuration",
+    "_meta": {
+      "title": "Trim Audio Duration"
+    }
+  }
+}

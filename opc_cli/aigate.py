@@ -585,6 +585,8 @@ def _prepare_workflow(
     video_node: Optional[str] = None,
     reference_image_node: Optional[str] = None,
     video_output_node: Optional[str] = None,
+    audio: Optional[str] = None,
+    audio_node: Optional[str] = None,
 ) -> tuple[dict, str]:
     path = Path(workflow_path)
     if not path.is_file():
@@ -632,12 +634,31 @@ def _prepare_workflow(
         local_video = Path(video)
         if not local_video.is_file():
             raise AigateError(f"输入视频不存在: {video}")
-        selected_video_node = video_node or _first_node_by_class(workflow, "VHS_LoadVideo")
-        if not selected_video_node:
-            raise AigateError("未找到 VHS_LoadVideo 节点，请用 --video-node 指定。")
-        _workflow_node(workflow, selected_video_node, "VHS_LoadVideo")["video"] = _upload_input_file(
-            base_url, local_video
+        selected_video_node = (
+            video_node
+            or _first_node_by_class(workflow, "VHS_LoadVideo")
+            or _first_node_by_class(workflow, "LoadVideo")
         )
+        if not selected_video_node:
+            raise AigateError("未找到视频加载节点（VHS_LoadVideo / LoadVideo），请用 --video-node 指定。")
+        video_inputs = _workflow_node(workflow, selected_video_node, "视频加载")
+        uploaded_video = _upload_input_file(base_url, local_video)
+        # VHS_LoadVideo 使用 "video" 输入键；原生 ComfyUI LoadVideo 使用 "file"。
+        if "file" in video_inputs and "video" not in video_inputs:
+            video_inputs["file"] = uploaded_video
+        else:
+            video_inputs["video"] = uploaded_video
+
+    if audio:
+        local_audio = Path(audio)
+        if not local_audio.is_file():
+            raise AigateError(f"输入音频不存在: {audio}")
+        selected_audio_node = audio_node or _first_node_by_class(workflow, "LoadAudio")
+        if not selected_audio_node:
+            raise AigateError("未找到音频加载节点（LoadAudio），请用 --audio-node 指定。")
+        _workflow_node(workflow, selected_audio_node, "音频加载")[
+            "audio"
+        ] = _upload_input_file(base_url, local_audio)
 
     if video_output_node:
         _replace_with_vhs_video_combine(workflow, video_output_node)
@@ -771,6 +792,8 @@ def submit_workflow(
     video_node: Optional[str] = None,
     reference_image_node: Optional[str] = None,
     video_output_node: Optional[str] = None,
+    audio: Optional[str] = None,
+    audio_node: Optional[str] = None,
 ) -> list[str]:
     """上传输入、执行工作流并把云端输出下载到本地。"""
     workflow, _ = _prepare_workflow(
@@ -793,6 +816,8 @@ def submit_workflow(
         video_node,
         reference_image_node,
         video_output_node,
+        audio,
+        audio_node,
     )
     submitted = _comfyui_json(
         "POST",
