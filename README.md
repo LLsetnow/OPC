@@ -24,7 +24,7 @@ cp .env.example .env
 # 然后编辑 .env 填入 API Key
 ```
 
-`.env.example` 包含所有可用配置项及详细说明，也有 API Key 回退链的优先级说明。
+`.env.example` 包含当前代码读取的配置项及详细说明。
 
 ## 命令一览
 
@@ -37,9 +37,8 @@ opc audio            音乐理解：使用 Qwen3-Omni Captioner 分析音频
 opc tts              文字转语音（支持音色克隆）
 opc local-tts        本地语音合成 + 服务管理（Qwen3-TTS）
 opc read-img         图片理解：使用视觉模型分析图片内容
-opc ui2vue           UI截图转Vue：分析 UI 截图生成 Vue 3 组件代码
 opc gpt-img          GPT-Image-2 文生图
-opc Z-image          阿里云 z-image-turbo 文生图
+opc image            阿里云 Qwen Image 3.0 文生图或图像编辑
 opc comfyui          ComfyUI 进程管理 + 工作流提交
 opc aigate           云扉 AIGate ComfyUI 实例管理 + 工作流提交
 opc check-api        检查 .env 中 API 的连通性
@@ -52,18 +51,16 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 
 | 环境变量 | 用途 | 涉及命令 |
 |---|---|---|
-| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | LLM 大模型（总结/日报/提示词丰富/代码生成） | bili, news, asr --llm-fix, gpt-img, Z-image, ui2vue, check-api |
-| `ZHIPU_API_KEY` / `ZHIPU_BASE_URL` | 智谱 API（TTS 引擎/音色克隆），也作为 Vision/LLM 回退 | tts --engine glm-tts, check-api |
-| `QWEN_TTS_API_KEY` / `QWEN_TTS_MODEL` / `VOICE_ID1/2` | 阿里云 CosyVoice TTS（默认引擎） | tts (默认) |
-| `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL` | 视觉模型（图片理解/UI 分析） | read-img, ui2vue |
-| `DASHSCOPE_API_KEY` / `ASR_API_KEY` / `ASR_MODEL` | 阿里云 ASR 语音识别 | asr, bili |
-| `ALIYUN_API_KEY` / `AUDIO_MODEL` | 阿里云 Qwen3-Omni 音乐理解 | audio |
-| `IMAGE_API_KEY` / `IMAGE_MODEL` | 阿里云文生图，也作为 ASR/TTS/GPT-Img 回退 | Z-image |
+| `DEEPSEEK_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | DeepSeek 通用 LLM（总结/日报/提示词丰富） | bili, news, asr --llm-fix, gpt-img, image, check-api |
+| `ZHIPU_API_KEY` / `ZHIPU_BASE_URL` | 智谱 API（GLM-TTS、音色克隆、视觉模型） | tts --engine glm-tts, read-img, check-api |
+| `ALIYUN_API_KEY` / `ASR_MODEL` / `QWEN_TTS_MODEL` / `IMAGE_MODEL` / `AUDIO_MODEL` | 阿里云 DashScope 统一凭证：ASR、CosyVoice TTS、Qwen Image 3.0、Qwen3-Omni 音乐理解 | asr, bili, tts (默认), image, audio |
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
 | `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
 | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | bili, douyin |
 | `BILI_FOLDER` | bili 默认输出目录 | bili |
 | `DOUYIN_FOLDER` | douyin 默认输出目录 | douyin |
+| `X_FOLDER` | X 视频默认输出目录 | x |
+| `MUSIC_FOLDER` | 网易云音乐默认输出目录 | music |
 | `NEWS_FOLDER` | news 默认输出目录 | news |
 | `COMFYUI_ROOT` | ComfyUI 根目录 | comfyui --start |
 | `AIGATE_TOKEN` | 云扉 Bearer Token | aigate |
@@ -421,7 +418,7 @@ opc read-img ui.png -p "每个控件的相对位置和像素大小是什么"
 ### 图片大小限制
 
 - 单张图片最大 **10MB**，超出时自动压缩（WebP → JPEG → 缩放）
-- API 配置优先级：`VISION_API_KEY` > `ZHIPU_API_KEY` > `LLM_API_KEY`
+- API 凭证：视觉模型统一使用 `ZHIPU_API_KEY`
 
 ---
 
@@ -461,82 +458,6 @@ opc audio librosa Hypervoid.m4a --beat-strength-threshold 0.35 --beat-min-interv
 | `--env-file` | | | 自定义 `.env` 文件路径 |
 
 `opc audio librosa <音频>` 会合并 `beat_times` 和 `onset_times` 候选，先按 `beat_strength` 阈值过滤，再按 `beat-min-interval` 窗口只保留最强事件。`beat_times` 是节拍网格，`onset_times` 是更密集的起音候选；`beat_strengths` / `onset_strengths` 是相对于全曲峰值的 0～1 强度估计，不等同于原始鼓机力度。
-
----
-
-## ui2vue — UI截图转Vue
-
-分析 UI 界面截图，使用视觉模型生成 Vue 3 单文件组件代码。三步流程：视觉分析 → 生成 Vue 代码 → 创建工程并自动修复。
-
-### 使用范例
-
-```bash
-# 完整流程：分析截图 → 生成代码 → 创建 Vue 工程
-opc ui2vue ui-screenshot.png
-
-# 使用 Element Plus 组件库
-opc ui2vue ui-screenshot.png -f element-plus
-
-# 使用 Tailwind CSS
-opc ui2vue ui-screenshot.png -f tailwind
-
-# 指定组件名称和输出目录
-opc ui2vue ui-screenshot.png -c UserProfile -o ./components
-
-# 分析网络图片
-opc ui2vue "https://example.com/ui-design.png"
-
-# 使用已有分析结果（跳过步骤1），直接生成代码
-opc ui2vue --analysis ./output/ui_analysis_20260427.md
-
-# 只生成代码，不创建 Vue 工程
-opc ui2vue ui.png --no-create-project
-
-# 不自动保存 .vue 文件（仅输出到终端/日志）
-opc ui2vue ui.png --no-save-vue
-
-# 指定 Vue 项目名称
-opc ui2vue ui.png -p my-dashboard
-```
-
-### 参数
-
-| 参数 | 简写 | 默认值 | 说明 |
-|---|---|---|---|
-| `image` | | | UI 截图路径或 URL（`--analysis` 时可省略） |
-| `--framework` | `-f` | `default` | UI 框架（见下表） |
-| `--component` | `-c` | 自动命名 | 组件名称 |
-| `--output` | `-o` | 当前目录 | 输出目录 |
-| `--project` | `-p` | `vue-app` | Vue 项目名称 |
-| `--vision-model` | | 从 .env 读取 `VISION_MODEL` | 视觉模型名称 |
-| `--llm-model` | | 从 .env 读取 `LLM_MODEL` | LLM 模型名称 |
-| `--max-tokens` | | `16384` | 最大输出 token 数 |
-| `--temperature` | | `0.3` | 生成温度 [0, 1] |
-| `--max-retries` | | `3` | 步骤3 最大自动修复重试次数 |
-| `--analysis` | | | 已有分析 md 文件路径（跳过步骤1） |
-| `--save-vue` | | `true` | 自动提取并保存 .vue 文件 |
-| `--create-project` | | `true` | 创建 Vue 工程并自动修复（步骤3） |
-| `--env-file` | | | 自定义 .env 文件路径 |
-
-### 支持的 UI 框架
-
-| 框架 ID | 说明 |
-|---|---|
-| `default` | 纯 Vue 3 + 自定义 CSS（默认） |
-| `element-plus` | Element Plus 组件库 |
-| `ant-design-vue` | Ant Design Vue 组件库 |
-| `naive-ui` | Naive UI 组件库 |
-| `vuetify` | Vuetify 组件库 |
-| `tailwind` | Tailwind CSS 工具类 |
-| `pure` | 纯 HTML/CSS，无 UI 框架 |
-
-### 输出文件
-
-| 文件 | 说明 |
-|---|---|
-| `output/ui_analysis_*.md` | 步骤1 UI 结构分析结果 |
-| `src/components/*.vue` | 提取的 Vue 单文件组件 |
-| `src/App.vue` | 自动生成的入口组件 |
 
 ---
 
@@ -605,50 +526,62 @@ opc gpt-img "测试图" --no-download
 
 ---
 
-## Z-image — 阿里云文生图
+## image — Qwen Image 3.0 文生图与图像编辑
 
-使用阿里云百炼 z-image-turbo 模型根据提示词生成图片，默认使用 LLM 丰富提示词。
+使用阿里云 DashScope 的 Qwen Image 3.0 模型进行文生图或图像编辑，默认使用 DeepSeek 丰富提示词。
 
 ### 使用范例
 
 ```bash
 # 基本文生图
-opc Z-image "一只穿着宇航服的猫"
+opc image "一只穿着宇航服的猫"
 
 # 指定输出路径
-opc Z-image "山水画" -o ./output/landscape.png
+opc image "山水画" -o ./output/landscape.png
+
+# 图像编辑：提供一张本地图片、公开 URL 或 data URI
+opc image "把天空改成绚丽的晚霞" --image ./input/landscape.png
+
+# 多图编辑/融合，最多 3 张参考图
+opc image "把图 1 的人物换成图 2 的服装" \
+  --image ./input/person.png \
+  --image ./input/clothes.png
 
 # 指定宽高比
-opc Z-image "人像" -s 3:4
-opc Z-image "横版风景" -s 16:9
+opc image "人像" -s 3:4
+opc image "横版风景" -s 16:9
 
 # 指定像素分辨率
-opc Z-image "高清图" -s 2048*2048
+opc image "高清图" -s 2048*2048
 
 # 不使用 LLM 丰富提示词
-opc Z-image "a cute cat" --no-enhance
+opc image "a cute cat" --no-enhance
 
 # 启用智能提示词改写（会增加时间和费用）
-opc Z-image "风景" --prompt-extend
+opc image "风景" --prompt-extend
 
 # 指定随机种子（可复现结果）
-opc Z-image "测试" --seed 42
+opc image "测试" --seed 42
 
 # 仅返回图片 URL
-opc Z-image "测试图" --no-download
+opc image "测试图" --no-download
 ```
 
 ### 参数
 
 | 参数 | 简写 | 默认值 | 说明 |
 |---|---|---|---|
-| `prompt` | | | 提示词（中英文） |
+| `prompt` | | | 文生图提示词或图像编辑指令（中英文） |
 | `--output` | `-o` | 自动生成 | 输出图片路径 |
 | `--size` | `-s` | `2:3` | 宽高比（如 2:3）或像素（如 1024*1536） |
-| `--model` | | `z-image-turbo` | 模型名称 |
-| `--enhance` | | `true` | 使用 LLM 丰富提示词 |
-| `--prompt-extend` | | `false` | 启用智能提示词改写 |
+| `--model` | | `.env` 的 `IMAGE_MODEL` | 模型名称，默认为 `qwen-image-3.0` |
+| `--image` | `-i` | | 编辑输入图片，可重复指定，最多 3 张 |
+| `--negative-prompt` | | | 负向提示词 |
+| `--n` | | `1` | 生成张数（1~6） |
+| `--enhance` | | `true` | 使用 DeepSeek 丰富提示词 |
+| `--prompt-extend` | | `true` | 启用 Qwen Image 智能提示词改写 |
 | `--seed` | | 随机 | 随机种子（0~2147483647） |
+| `--watermark` | | `false` | 是否添加水印 |
 | `--no-download` | | `false` | 仅返回图片 URL |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
@@ -829,7 +762,15 @@ opc aigate --release --instance INSTANCE_ID
 
 ## check-api — API 连通性检查
 
-检查 `.env` 中配置的 API 是否可用，显示状态、耗时和详情。
+根据当前 `.env` 中的凭证配置，先列出每个 `opc` 命令的可用程度，再检查 API 的连通性、状态、耗时和详情。
+
+命令状态分为：
+
+- **可用**：命令的主要功能所需配置齐全。
+- **部分可用**：命令仍有部分模式可用，例如 `bili --audio-only` 或 `image --no-enhance`。
+- **不可用**：缺少该命令所需的 API Key 或 Token。
+
+检查只会显示正在使用的环境变量名，不会打印 API Key 内容。缺少凭证时会直接显示配置问题，不会因为配置读取函数退出而产生重复错误提示。
 
 ### 使用范例
 
@@ -837,8 +778,8 @@ opc aigate --release --instance INSTANCE_ID
 # 检查全部 API
 opc check-api
 
-# 只检查 LLM 和 Vision
-opc check-api --only llm --only vision
+# 只检查 DeepSeek 和 Vision
+opc check-api --only deepseek --only vision
 
 # 只检查文生图相关
 opc check-api --only image --only gpt-image
@@ -849,7 +790,7 @@ opc check-api --env-file /path/to/.env
 
 ### 可检查的 API 名称
 
-`llm` / `zhipu` / `vision` / `image` / `gpt-image` / `proxy` / `cookies`
+`deepseek`（兼容别名 `llm`）/ `zhipu` / `asr` / `audio` / `qwen-tts` / `vision` / `image` / `gpt-image` / `proxy` / `cookies`
 
 ---
 
@@ -905,12 +846,11 @@ opc_cli/
 ├── local_tts.py    # Qwen3-TTS 本地语音合成
 ├── tts_server.py   # TTS 常驻服务（Flask）
 ├── vision.py       # 图片理解（视觉模型）
-├── ui2vue.py       # UI 截图转 Vue 组件代码
 ├── comfyui.py      # ComfyUI 进程管理 + 工作流提交
 ├── aigate.py       # 云扉 AIGate ComfyUI 实例管理 + 工作流提交
 ├── check_api.py    # API 连通性检查
 ├── gpt_img.py      # GPT-Image-2 文生图
-├── text2img.py     # 阿里云 z-image-turbo 文生图
+├── text2img.py     # 阿里云 Qwen Image 3.0 文生图与图像编辑
 └── ai_daily.py     # AI 日报
 ```
 

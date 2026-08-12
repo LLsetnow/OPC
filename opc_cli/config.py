@@ -39,15 +39,13 @@ def get_api_config() -> tuple:
 
 
 def get_llm_config() -> tuple:
-    """获取 LLM 配置，返回 (api_key, base_url, model)"""
-    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("ZHIPU_API_KEY", "")
-    base_url = os.environ.get("LLM_BASE_URL") or os.environ.get(
-        "ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
-    )
-    model = os.environ.get("LLM_MODEL", "glm-4-flash")
+    """获取 DeepSeek LLM 配置，返回 (api_key, base_url, model)。"""
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
+    model = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
 
     if not api_key:
-        print("错误: 未设置 LLM_API_KEY 或 ZHIPU_API_KEY 环境变量")
+        print("错误: 未设置 DEEPSEEK_API_KEY 环境变量")
         sys.exit(1)
 
     return api_key, base_url, model
@@ -56,18 +54,15 @@ def get_llm_config() -> tuple:
 def get_vision_config() -> tuple:
     """
     获取视觉模型 API 配置，返回 (api_key, base_url, model)。
-    优先使用 VISION_API_KEY / VISION_BASE_URL / VISION_MODEL，
-    其次回退到 ZHIPU_API_KEY / ZHIPU_BASE_URL，
-    最后回退到 LLM_API_KEY / LLM_BASE_URL。
+    使用 ZHIPU_API_KEY，并允许通过 VISION_BASE_URL / VISION_MODEL 覆盖模型配置。
     """
-    api_key = os.environ.get("VISION_API_KEY", "")
+    api_key = os.environ.get("ZHIPU_API_KEY", "")
     base_url = os.environ.get("VISION_BASE_URL", "")
     model = os.environ.get("VISION_MODEL", "glm-5v-turbo")
-    api_key = api_key or os.environ.get("ZHIPU_API_KEY", "")
     base_url = base_url or os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     if not api_key:
         print("错误: 未设置视觉 API 密钥")
-        print("请在 .env 文件中添加 VISION_API_KEY 或 ZHIPU_API_KEY")
+        print("请在 .env 文件中添加 ZHIPU_API_KEY")
         sys.exit(1)
 
     return api_key, base_url.rstrip("/"), model
@@ -75,16 +70,15 @@ def get_vision_config() -> tuple:
 
 def get_image_config() -> tuple:
     """
-    获取文生图 API 配置（阿里云 z-image-turbo），返回 (api_key, model)。
-    优先使用 IMAGE_API_KEY / IMAGE_MODEL，
-    其次回退到 DASHSCOPE_API_KEY。
+    获取阿里云 Qwen Image 文生图/图像编辑配置，返回 (api_key, model)。
+    使用 ALIYUN_API_KEY / IMAGE_MODEL。
     """
-    api_key = os.environ.get("IMAGE_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", "")
-    model = os.environ.get("IMAGE_MODEL", "z-image-turbo")
+    api_key = os.environ.get("ALIYUN_API_KEY", "")
+    model = os.environ.get("IMAGE_MODEL", "qwen-image-3.0")
 
     if not api_key:
-        print("错误: 未设置 IMAGE_API_KEY 或 DASHSCOPE_API_KEY 环境变量")
-        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        print("错误: 未设置 ALIYUN_API_KEY 环境变量")
+        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_aliyun_api_key")
         sys.exit(1)
 
     return api_key, model
@@ -93,10 +87,9 @@ def get_image_config() -> tuple:
 def get_gpt_image_config() -> tuple:
     """
     获取 GPT-Image-2 文生图 API 配置，返回 (api_key, base_url, model)。
-    优先使用 GPT_IMAGE_API_KEY / GPT_IMAGE_BASE_URL / GPT_IMAGE_MODEL，
-    其次回退到 IMAGE_API_KEY。
+    使用 GPT_IMAGE_API_KEY / GPT_IMAGE_BASE_URL / GPT_IMAGE_MODEL。
     """
-    api_key = os.environ.get("GPT_IMAGE_API_KEY") or os.environ.get("IMAGE_API_KEY", "")
+    api_key = os.environ.get("GPT_IMAGE_API_KEY", "")
     base_url = os.environ.get("GPT_IMAGE_BASE_URL", "https://api.apimart.ai/v1")
     model = os.environ.get("GPT_IMAGE_MODEL", "gpt-image-2-official")
 
@@ -112,20 +105,14 @@ def get_asr_config() -> tuple:
     """
     获取 ASR 语音识别 API 配置，返回 (api_key, model)。
     使用 DashScope SDK 的 Recognition 类（非 OpenAI 兼容模式）。
-    优先使用 ASR_API_KEY，
-    其次回退到 IMAGE_API_KEY（阿里云 DashScope），
-    最后回退到 DASHSCOPE_API_KEY。
+    使用 ALIYUN_API_KEY。
     """
-    api_key = (
-        os.environ.get("ASR_API_KEY")
-        or os.environ.get("IMAGE_API_KEY")
-        or os.environ.get("DASHSCOPE_API_KEY", "")
-    )
+    api_key = os.environ.get("ALIYUN_API_KEY", "")
     model = os.environ.get("ASR_MODEL", "fun-asr-realtime")
 
     if not api_key:
-        print("错误: 未设置 ASR_API_KEY 或 IMAGE_API_KEY 环境变量")
-        print("请在 .env 文件中添加: IMAGE_API_KEY=your_dashscope_api_key")
+        print("错误: 未设置 ALIYUN_API_KEY 环境变量")
+        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_aliyun_api_key")
         sys.exit(1)
 
     return api_key, model
@@ -138,7 +125,7 @@ def get_audio_config() -> tuple:
 
     if not api_key:
         print("错误: 未设置 ALIYUN_API_KEY 环境变量")
-        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_dashscope_api_key")
+        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_aliyun_api_key")
         sys.exit(1)
 
     return api_key, model
@@ -148,15 +135,14 @@ def get_qwen_tts_config() -> tuple:
     """
     获取阿里云 Qwen TTS（CosyVoice）API 配置，返回 (api_key, model)。
     使用 DashScope SDK 的 SpeechSynthesizer 类（WebSocket 协议）。
-    优先使用 QWEN_TTS_API_KEY / QWEN_TTS_MODEL，
-    其次回退到 IMAGE_API_KEY（阿里云 DashScope）。
+    使用 ALIYUN_API_KEY / QWEN_TTS_MODEL。
     """
-    api_key = os.environ.get("QWEN_TTS_API_KEY") or os.environ.get("IMAGE_API_KEY", "")
+    api_key = os.environ.get("ALIYUN_API_KEY", "")
     model = os.environ.get("QWEN_TTS_MODEL", "cosyvoice-v3-flash")
 
     if not api_key:
-        print("错误: 未设置 QWEN_TTS_API_KEY 或 IMAGE_API_KEY 环境变量")
-        print("请在 .env 文件中添加: QWEN_TTS_API_KEY=your_dashscope_api_key")
+        print("错误: 未设置 ALIYUN_API_KEY 环境变量")
+        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_aliyun_api_key")
         sys.exit(1)
 
     return api_key, model
