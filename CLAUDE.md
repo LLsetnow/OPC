@@ -14,6 +14,7 @@
 | 单独ASR转写 | `opc asr audio.wav` | 将音频转写为 SRT + JSON 字幕 |
 | 语音识别(LLM修复) | `opc asr audio.wav --llm-fix` | LLM 修复断词和标点错误 |
 | 音乐理解 | `opc audio audio.m4a` | 使用 Qwen3-Omni Captioner 分析曲风、乐器、情绪和结构 |
+| 音乐鼓点检测 | `opc audio librosa audio.m4a` | 使用 librosa 输出筛选后的 BPM、节拍和起音时刻 |
 | 文字转语音(CosyVoice) | `opc tts "文本" -o output.wav` | 默认 CosyVoice v3-flash + 龙呼呼音色，支持音色克隆 |
 | 文字转语音(本地Qwen3) | `opc local-tts "文本" -o output.wav` | 本地模型，需GPU |
 | 图片理解/分析 | `opc read-img image.png` | 支持本地图片和URL，自动压缩超大图 |
@@ -174,6 +175,9 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 
 # 音乐理解（Qwen3-Omni Captioner；密钥从 .env 的 ALIYUN_API_KEY 读取）
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc audio audio.m4a"
+
+# librosa 鼓点检测（不调用云端模型）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc audio librosa audio.m4a"
 
 # B站视频下载MP3
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc bili 'https://www.bilibili.com/video/BV1xx' --audio-only"

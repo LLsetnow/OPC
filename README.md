@@ -440,16 +440,27 @@ opc audio Hypervoid.m4a -o Hypervoid.analysis.txt
 
 # 覆盖默认模型
 opc audio Hypervoid.m4a --model qwen3-omni-30b-a3b-captioner
+
+# 独立使用 librosa 检测 BPM、节拍和鼓点候选时刻（默认每秒最多保留 1 个）
+opc audio librosa Hypervoid.m4a
+
+# 提高阈值，进一步减少弱鼓点；调整最小间隔
+opc audio librosa Hypervoid.m4a --beat-strength-threshold 0.35 --beat-min-interval 1.0
 ```
 
 ### 参数
 
 | 参数 | 简写 | 默认值 | 说明 |
 |---|---|---|---|
-| `audio` | | | 输入音频路径（支持 `.wav/.mp3/.m4a/.mp4/.webm/.ogg/.opus/.mov/.mkv`） |
+| `audio` | | | 输入音频路径，或使用 `librosa` 模式 |
+| `audio_file` | | | `librosa` 模式下的输入音频路径 |
 | `--output` | `-o` | 终端输出 | 将分析结果保存到文本文件 |
 | `--model` | | `.env` 中的 `AUDIO_MODEL` | 音乐理解模型，默认 `qwen3-omni-30b-a3b-captioner` |
+| `--beat-strength-threshold` | `--beat-threshold` | `0.2` | `librosa` 模式只保留相对强度不低于该值的事件（0～1） |
+| `--beat-min-interval` | | `1.0` 秒 | `librosa` 模式每个时间窗口只保留最强事件 |
 | `--env-file` | | | 自定义 `.env` 文件路径 |
+
+`opc audio librosa <音频>` 会合并 `beat_times` 和 `onset_times` 候选，先按 `beat_strength` 阈值过滤，再按 `beat-min-interval` 窗口只保留最强事件。`beat_times` 是节拍网格，`onset_times` 是更密集的起音候选；`beat_strengths` / `onset_strengths` 是相对于全曲峰值的 0～1 强度估计，不等同于原始鼓机力度。
 
 ---
 
@@ -914,6 +925,7 @@ opc_cli/
 - **yt-dlp** — B站视频下载
 - **soundfile** + **numpy** — 音频分片处理
 - **dashscope** — 阿里云 Qwen3-Omni 音乐理解 / ASR / TTS API
+- **librosa** — BPM、节拍和起音时刻检测
 - **Pillow** — 图片压缩处理
 
 ## 常见问题

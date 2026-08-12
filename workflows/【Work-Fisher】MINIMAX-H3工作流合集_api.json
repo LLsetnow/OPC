@@ -1,0 +1,309 @@
+{
+  "189": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "190": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "191": {
+    "inputs": {
+      "samples": [
+        "200",
+        0
+      ],
+      "vae": [
+        "190",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "192": {
+    "inputs": {
+      "samples": [
+        "200",
+        0
+      ],
+      "vae": [
+        "189",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "193": {
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "194": {
+    "inputs": {
+      "model": [
+        "201",
+        0
+      ],
+      "conditioning": [
+        "199",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "Basic Guider"
+    }
+  },
+  "195": {
+    "inputs": {
+      "noise_seed": 335224740220593
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "196": {
+    "inputs": {
+      "fps": 24,
+      "bit_depth": 8,
+      "images": [
+        "192",
+        0
+      ],
+      "audio": [
+        "191",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "Create Video"
+    }
+  },
+  "197": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "时长（秒）"
+    }
+  },
+  "198": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 24,
+      "denoise": 1,
+      "model": [
+        "201",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
+    }
+  },
+  "199": {
+    "inputs": {
+      "prompt": [
+        "213",
+        0
+      ],
+      "width": [
+        "243",
+        0
+      ],
+      "height": [
+        "242",
+        0
+      ],
+      "length": [
+        "204",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "202",
+        0
+      ],
+      "vae": [
+        "189",
+        0
+      ],
+      "audio_vae": [
+        "190",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "208",
+        0
+      ],
+      "ref_audios.ref_audio_0": [
+        "214",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    }
+  },
+  "200": {
+    "inputs": {
+      "noise": [
+        "195",
+        0
+      ],
+      "guider": [
+        "194",
+        0
+      ],
+      "sampler": [
+        "193",
+        0
+      ],
+      "sigmas": [
+        "198",
+        0
+      ],
+      "latent_image": [
+        "199",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "201": {
+    "inputs": {
+      "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "202": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "203": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "codec": "auto",
+      "fw_video_preview": "",
+      "video-preview": "",
+      "video": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "💾 Save Video"
+    }
+  },
+  "204": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "197",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "208": {
+    "inputs": {
+      "image": "14cc8d31dae641db5222c8ae4a6f237fc790575e2377aefb75e1b50eb8f51b3b.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "213": {
+    "inputs": {
+      "value": "subject_definitions:\n<Subject 1> is the idol girl Chixia, whose appearance comes from <Picture 1>: silver-grey slightly wavy short hair with a teal bow, golden eyes, blushed cheeks, a white academy-style short-sleeved shirt with a red angel-star tie, a black puffy short skirt, pink-and-white striped arm and leg sleeves, pink platform shoes, and a pair of small angel wings on her back.\n<Audio 1> is the voice-timbre reference for <Subject 1> (S1), a young female voice.\n\nsummary:\n[reference generation + audio reference] The target video shows <Subject 1> standing against a pure white background in a single fixed shot, greeting the camera and making a finger-heart; her spoken line is delivered in the voice timbre referenced from <Audio 1>.\n\nretention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - identity, silver-grey wavy short hair, teal bow, golden eyes, cheek blush, white academy shirt with red angel-star tie, black puffy skirt, striped arm and leg sleeves, pink platform shoes, and back angel wings are all retained.\n<Audio 1>: reference - <Subject 1>'s spoken line follows <Audio 1>'s voice timbre and delivery without copying the original signal.\n\ndetailed_description:\nThe target video is in a Zenless Zone Zero game-CG style with 3D cel-shaded rendering, a fixed waist-up front view, a pure white seamless background, and soft warm lighting.\n[Shot 1] <Subject 1> stands facing the camera, showing her silver-grey slightly wavy short hair with a teal bow, golden eyes, blushed cheeks, white academy-style shirt with a red angel-star tie, pink-and-white striped arm sleeves, and small angel wings. Using the young female voice timbre referenced from <Audio 1>, <Subject 1> (S1) waves her right hand and says at a bright, cheerful pace, <d>[Chinese] 大家好呀，我是千夏！今天也要元气满满哦！</d> As she finishes, she lifts her hand beside her cheek into a small finger-heart, tilts her head, blinks once, and breaks into a closed-mouth smile; her angel wings flutter open and settle while her silver hair sways lightly. The camera pushes in with small amplitude at slow speed toward her face, ending on the finger-heart pose. No subtitles or watermark appear.\n\noverall_soundscape:\nA quiet indoor room tone continues throughout, with a soft fabric rustle as her sleeves move and a brief light flutter of the wings.\n\nnon_diegetic_music:\nA light pop-electronic cue at a moderate tempo, with a plucked-synth melody and a soft kick on the beat, kept low under the voice."
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Input Text (Prompt)"
+    }
+  },
+  "214": {
+    "inputs": {
+      "audio": "fee64d073c4227d8511277361098dbd8fcb5692cf1f1e035a743061e95f49cc0.mp3",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Audio"
+    }
+  },
+  "242": {
+    "inputs": {
+      "value": 864
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "高"
+    }
+  },
+  "243": {
+    "inputs": {
+      "value": 480
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "宽"
+    }
+  },
+  "245": {
+    "inputs": {
+      "file": "None",
+      "keep_audio": false,
+      "trim_time": "0"
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "Load Video"
+    }
+  }
+}
