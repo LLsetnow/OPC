@@ -1,8 +1,9 @@
-"""OPC CLI 入口：B站视频转写 + 音乐理解 + 语音合成 + 图片理解 + 文生图"""
+"""OPC CLI 入口：B站视频转写 + 音视频理解 + 语音合成 + 图片理解 + 文生图"""
 
 import os
 import sys
 import json
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +17,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_x_folder, get_news_folder, get_music_folder, _is_wsl
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_x_folder, get_news_folder, get_music_folder, get_music_gen_config, _is_wsl
 from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
 from .audio import (
     AudioUnderstandingError,
@@ -50,6 +51,7 @@ from .tts_server import (
     DEFAULT_PORT as _TTS_DEFAULT_PORT,
 )
 from .vision import understand_image
+from .video import VideoUnderstandingError, understand_video
 from .ai_daily import run_ai_daily
 from .check_api import get_command_availability, run_check_api
 from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
@@ -68,7 +70,8 @@ from .aigate import (
     submit_workflow as _aigate_submit_workflow,
     wait_for_comfyui as _aigate_wait_for_comfyui,
 )
-from .text2img import generate_image, download_image, enhance_prompt
+from .text2img import generate_image, download_image
+from .music_gen import download_music, generate_music
 from .gpt_image import (
     submit_and_wait as _gpt_submit_and_wait,
     enhance_prompt as _gpt_enhance_prompt,
@@ -80,7 +83,7 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 音乐理解 + 音乐下载 + 语音合成 + 图片理解 + 文生图/图像编辑 + ComfyUI + 云扉 AIGate",
+    help="OPC 工具集：B站视频转写 + 音乐理解/生成/下载 + 语音合成 + 图片理解 + 文生图/图像编辑 + ComfyUI + 云扉 AIGate",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -230,6 +233,75 @@ def music_cmd(
         cookies=cookies,
         playlist=playlist,
     )
+
+
+# ── music-gen 子命令 ────────────────────────────────────────────
+
+@app.command("music-gen")
+def music_gen_cmd(
+    prompt: Optional[str] = typer.Argument(None, help="音乐风格、场景和情绪描述"),
+    lyrics: Optional[str] = typer.Option(None, "--lyrics", help="自定义歌词，与 prompt 至少提供一个"),
+    lyrics_file: Optional[str] = typer.Option(None, "--lyrics-file", help="从 UTF-8 文本文件读取自定义歌词"),
+    gender: str = typer.Option("female", "--gender", help="人声性别：female 或 male（仅 fun-music-v1 生效）"),
+    instrumental: bool = typer.Option(False, "--instrumental", help="生成纯音乐，忽略 lyrics 和 gender"),
+    provider: str = typer.Option("", "--provider", help="音乐服务商：aliyun 或 minimax（默认读取 MUSIC_GEN_PROVIDER）"),
+    model: str = typer.Option("", "--model", help="模型名称（默认由服务商配置决定）"),
+    lyrics_optimizer: Optional[bool] = typer.Option(
+        None,
+        "--lyrics-optimizer/--no-lyrics-optimizer",
+        help="MiniMax 根据 prompt 自动生成歌词（默认：无歌词时自动启用）",
+    ),
+    output_format: str = typer.Option("mp3", "--format", help="音频格式：mp3 或 wav"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出音频路径（默认 output/music_gen_<时间戳>.<格式>）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """使用阿里云 Fun-Music 或 MiniMax Music 生成歌曲/纯音乐。"""
+    load_env(env_file)
+    selected_provider = (provider or os.environ.get("MUSIC_GEN_PROVIDER", "aliyun")).strip().lower()
+
+    if lyrics is not None and lyrics_file:
+        console.print("[red]错误: --lyrics 和 --lyrics-file 只能二选一[/red]")
+        raise typer.Exit(1)
+
+    if lyrics_file:
+        try:
+            lyrics = Path(lyrics_file).read_text(encoding="utf-8")
+        except OSError as error:
+            console.print(f"[red]读取歌词文件失败: {error}[/red]")
+            raise typer.Exit(1)
+
+    try:
+        api_key, base_url, cfg_model = get_music_gen_config(selected_provider)
+        result = generate_music(
+            prompt=prompt,
+            lyrics=lyrics,
+            is_instrumental=instrumental,
+            gender=gender,
+            api_key=api_key,
+            base_url=base_url,
+            model=model or cfg_model,
+            format=output_format,
+            provider=selected_provider,
+            lyrics_optimizer=lyrics_optimizer,
+        )
+    except (ValueError, RuntimeError) as error:
+        console.print(f"[red]生成失败: {error}[/red]")
+        raise typer.Exit(1)
+
+    if output is None:
+        output = str(Path("output") / f"music_gen_{time.strftime('%Y%m%d_%H%M%S')}.{output_format.lower()}")
+
+    try:
+        output_path = download_music(result["audio_url"], output)
+    except (OSError, RuntimeError) as error:
+        console.print(f"[red]下载音乐失败: {error}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]音乐生成成功![/green] provider={selected_provider} 已保存: {output_path}")
+    if result.get("duration") is not None:
+        console.print(f"时长: {result['duration']} 秒")
+    if result.get("lyrics") and not instrumental:
+        console.print("已返回模型生成/使用的歌词，可在 API 响应中获取。")
 
 
 # ── asr 子命令 ────────────────────────────────────────────────────
@@ -959,6 +1031,51 @@ def img(
         console.print("=" * 50)
 
 
+@app.command("video")
+def video_cmd(
+    video: str = typer.Argument(..., help="本地视频路径或可直接访问的视频 URL"),
+    prompt: str = typer.Option(
+        "请详细分析这个视频的内容、镜头运动、构图、主体动作和时间线。",
+        "-p",
+        "--prompt",
+        help="提问内容",
+    ),
+    output: Optional[str] = typer.Option(
+        None, "-o", "--output", help="输出到文件（默认打印到终端）"
+    ),
+    model: str = typer.Option(
+        "", "--model", help="Qwen3-VL 模型名称（默认从 .env VIDEO_MODEL 读取）"
+    ),
+    max_tokens: int = typer.Option(4096, "--max-tokens", help="最大输出 token 数"),
+    temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """视频理解：使用 Qwen3-VL 分析视频内容和镜头运动。"""
+    load_env(env_file)
+
+    try:
+        result = understand_video(
+            video=video,
+            prompt=prompt,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    except (VideoUnderstandingError, OSError) as error:
+        console.print(f"[red]错误: {error}[/red]")
+        raise typer.Exit(1)
+
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(result + "\n", encoding="utf-8")
+        console.print(f"\n结果已保存: {output_path}")
+    else:
+        console.print("\n" + "=" * 50)
+        console.print(result)
+        console.print("=" * 50)
+
+
 # ── gpt-img 子命令 ──────────────────────────────────────────────
 
 @app.command("gpt-img")
@@ -1125,7 +1242,6 @@ def image_cmd(
     image: Optional[list[str]] = typer.Option(None, "-i", "--image", help="编辑输入图片路径、URL 或 data URI，可重复指定，最多 3 张"),
     negative_prompt: Optional[str] = typer.Option(None, "--negative-prompt", help="负向提示词"),
     n: int = typer.Option(1, "--n", help="生成张数（1~6）"),
-    enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 DeepSeek 丰富提示词（默认开启）"),
     prompt_extend: bool = typer.Option(True, "--prompt-extend/--no-prompt-extend", help="启用 Qwen Image 智能提示词改写（默认开启）"),
     seed: Optional[int] = typer.Option(None, "--seed", help="随机种子（0~2147483647）"),
     watermark: bool = typer.Option(False, "--watermark/--no-watermark", help="是否添加水印"),
@@ -1135,7 +1251,7 @@ def image_cmd(
     """使用阿里云 Qwen Image 3.0 进行文生图或图像编辑。
 
     不提供 --image 时执行文生图；提供 1~3 张 --image 时执行图像编辑。
-    默认使用 DeepSeek 丰富提示词，可通过 --no-enhance 关闭。
+    提示词会直接发送给 Qwen Image；可通过 --prompt-extend 控制模型自身的提示词改写。
     """
     load_env(env_file)
     api_key, cfg_model = get_image_config()
@@ -1148,29 +1264,11 @@ def image_cmd(
     if image:
         console.print(f"参考图: {len(image)} 张")
 
-    use_prompt = prompt
-    if enhance:
-        console.print("\n[cyan]🧠 使用 DeepSeek 丰富提示词...[/cyan]")
-        try:
-            llm_key, llm_url, llm_model = get_llm_config()
-            enhanced = enhance_prompt(
-                prompt=prompt,
-                llm_api_key=llm_key,
-                llm_base_url=llm_url,
-                llm_model=llm_model,
-                aspect_ratio=size,
-            )
-            use_prompt = enhanced["flat"]
-            console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
-            console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
-        except Exception as e:
-            console.print(f"[yellow]⚠ DeepSeek 丰富失败，使用原始提示词: {e}[/yellow]")
-
     import time
     t0 = time.time()
     try:
         result = generate_image(
-            prompt=use_prompt,
+            prompt=prompt,
             api_key=api_key,
             size=size,
             model=use_model,
@@ -1234,7 +1332,7 @@ def check_api(
 ):
     """检查 API 连通性，并显示当前可用的 opc 命令。
 
-    可用 API 名称: deepseek (或 llm), zhipu, asr, audio, qwen-tts, vision, image, gpt-image, proxy, cookies
+    可用 API 名称: deepseek (或 llm), zhipu, asr, audio, qwen-tts, vision, video, image, gpt-image, proxy, cookies
 
     示例:
       opc check-api                # 检查全部

@@ -15,6 +15,7 @@
 | 语音识别(LLM修复) | `opc asr audio.wav --llm-fix` | LLM 修复断词和标点错误 |
 | 音乐理解 | `opc audio audio.m4a` | 使用 Qwen3-Omni Captioner 分析曲风、乐器、情绪和结构 |
 | 音乐鼓点检测 | `opc audio librosa audio.m4a` | 使用 librosa 输出筛选后的 BPM、节拍和起音时刻 |
+| 视频理解 | `opc video video.mp4` | 使用 Qwen3-VL 分析视频内容、镜头运动、构图和时间线 |
 | 文字转语音(CosyVoice) | `opc tts "文本" -o output.wav` | 默认 CosyVoice v3-flash + 龙呼呼音色，支持音色克隆 |
 | 文字转语音(本地Qwen3) | `opc local-tts "文本" -o output.wav` | 本地模型，需GPU |
 | 图片理解/分析 | `opc read-img image.png` | 支持本地图片和URL，自动压缩超大图 |
@@ -150,7 +151,7 @@ opc aigate --run \
 
 `opc` 安装在 WSL 的虚拟环境中，执行任何 `opc` 命令前**必须**先激活 venv：
 
-- **常规命令**（bili/music/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news/comfyui）：使用 `~/qwen3-tts-venv`
+- **常规命令**（bili/music/tts/read-img/video/ui2vue/gpt-img/Z-image/check-api/news/comfyui）：使用 `~/qwen3-tts-venv`
 - **local-tts**（本地Qwen3-TTS）：使用 `~/qwen3-tts-venv`（需要 torch）
 
 ### 命令执行格式

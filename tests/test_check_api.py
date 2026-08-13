@@ -15,6 +15,7 @@ from opc_cli.config import (
     get_asr_config,
     get_image_config,
     get_llm_config,
+    get_music_gen_config,
     get_qwen_tts_config,
 )
 
@@ -51,6 +52,20 @@ class CheckApiTests(unittest.TestCase):
         self.assertEqual(availability["bili"].status, "可用")
         self.assertEqual(availability["aigate"].status, "可用")
         self.assertEqual(availability["audio"].status, "可用")
+        self.assertEqual(availability["music-gen"].status, "可用")
+
+    def test_minimax_key_alone_enables_music_generation(self):
+        with patch.dict(
+            os.environ,
+            {"MINIMAX_API_KEY": "minimax-test-key"},
+            clear=True,
+        ):
+            availability = {
+                item.command: item for item in get_command_availability()
+            }
+
+        self.assertEqual(availability["music-gen"].status, "可用")
+        self.assertIn("MiniMax Music", availability["music-gen"].detail)
 
     def test_check_map_includes_all_dashscope_audio_checks(self):
         self.assertIn("deepseek", CHECK_MAP)
@@ -107,6 +122,49 @@ class CheckApiTests(unittest.TestCase):
         self.assertEqual((image_key, image_model), ("aliyun-test-key", "image-test-model"))
         self.assertEqual((tts_key, tts_model), ("aliyun-test-key", "tts-test-model"))
 
+    def test_music_gen_uses_beijing_workspace_endpoint(self):
+        env = {
+            "ALIYUN_API_KEY": "aliyun-test-key",
+            "MUSIC_GEN_WORKSPACE_ID": "workspace123",
+            "MUSIC_GEN_MODEL": "fun-music-v1",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            key, base_url, model = get_music_gen_config()
+
+        self.assertEqual(key, "aliyun-test-key")
+        self.assertEqual(
+            base_url,
+            "https://workspace123.cn-beijing.maas.aliyuncs.com/api/v1",
+        )
+        self.assertEqual(model, "fun-music-v1")
+
+    def test_music_gen_uses_minimax_free_defaults(self):
+        with patch.dict(
+            os.environ,
+            {"MINIMAX_API_KEY": "minimax-test-key"},
+            clear=True,
+        ):
+            key, base_url, model = get_music_gen_config("minimax")
+
+        self.assertEqual(key, "minimax-test-key")
+        self.assertEqual(base_url, "https://api.minimaxi.com")
+        self.assertEqual(model, "music-3.0-free")
+
+    def test_music_gen_provider_environment_selects_minimax(self):
+        with patch.dict(
+            os.environ,
+            {
+                "MUSIC_GEN_PROVIDER": "minimax",
+                "MINIMAX_API_KEY": "minimax-test-key",
+            },
+            clear=True,
+        ):
+            key, base_url, model = get_music_gen_config()
+
+        self.assertEqual(key, "minimax-test-key")
+        self.assertEqual(base_url, "https://api.minimaxi.com")
+        self.assertEqual(model, "music-3.0-free")
+
     def test_default_tts_does_not_require_zhipu_key(self):
         runner = CliRunner()
         with patch("opc_cli.cli.load_env"), patch(
@@ -146,6 +204,7 @@ class CheckApiTests(unittest.TestCase):
         self.assertEqual(availability["news"].status, "不可用")
         self.assertEqual(availability["asr"].status, "不可用")
         self.assertEqual(availability["image"].status, "不可用")
+        self.assertEqual(availability["music-gen"].status, "不可用")
         self.assertEqual(availability["tts"].status, "不可用")
 
 

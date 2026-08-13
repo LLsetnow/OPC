@@ -77,6 +77,10 @@ class QwenImageTests(unittest.TestCase):
         self.assertNotIn("ui2vue", result.output)
         self.assertNotIn("Z-image", result.output)
 
+        image_help = CliRunner().invoke(app, ["image", "--help"])
+        self.assertEqual(image_help.exit_code, 0, image_help.output)
+        self.assertNotIn("--enhance", image_help.output)
+
 
 if __name__ == "__main__":
     unittest.main()
