@@ -21,6 +21,8 @@ dist/
 # 浏览器导出的登录会话 cookies，禁止提交。
 cookies.txt
 *_cookies.txt
+# macOS/browser cookie clipboard exports
+*.textClipping
 
 # ── IDE / 编辑器 ─────────────────────────────
 .obsidian/

@@ -14,6 +14,7 @@ from .config import (
     get_llm_config,
     get_api_config,
     get_vision_config,
+    get_video_config,
     get_image_config,
     get_gpt_image_config,
     get_gpt_img_proxy,
@@ -72,6 +73,9 @@ def get_command_availability() -> list[CommandAvailability]:
     image_source = asr_source
     qwen_tts_source = asr_source
     audio_source = _key_source("ALIYUN_API_KEY")
+    video_source = _key_source("ALIYUN_API_KEY")
+    minimax_music_source = _key_source("MINIMAX_API_KEY")
+    music_gen_source = _key_source("ALIYUN_API_KEY", "MINIMAX_API_KEY")
     gpt_image_source = _key_source("GPT_IMAGE_API_KEY")
     aigate_source = _key_source("AIGATE_TOKEN")
     comfyui_source = _key_source("COMFYUI_ROOT")
@@ -102,14 +106,16 @@ def get_command_availability() -> list[CommandAvailability]:
         if gpt_image_source
         else "缺少 GPT_IMAGE_API_KEY"
     )
-    image_status = "不可用" if not image_source else "可用" if deepseek_source else "部分可用"
-    image_detail = (
-        "文生图和 DeepSeek 提示词增强均可用"
-        if image_source and deepseek_source
-        else "可使用 --no-enhance 生成图片；缺少 DeepSeek 提示词增强"
-        if image_source
-        else "缺少 ALIYUN_API_KEY"
-    )
+    image_status = "可用" if image_source else "不可用"
+    image_detail = "Qwen Image 文生图/编辑可用" if image_source else "缺少 ALIYUN_API_KEY"
+    if audio_source and minimax_music_source:
+        music_gen_detail = "阿里云 Fun-Music + MiniMax Music 均可用"
+    elif audio_source:
+        music_gen_detail = "仅阿里云 Fun-Music 可用；缺少 MINIMAX_API_KEY"
+    elif minimax_music_source:
+        music_gen_detail = "仅 MiniMax Music 可用；缺少 ALIYUN_API_KEY"
+    else:
+        music_gen_detail = "缺少 ALIYUN_API_KEY 和 MINIMAX_API_KEY"
 
     return [
         CommandAvailability(
@@ -136,6 +142,12 @@ def get_command_availability() -> list[CommandAvailability]:
             f"使用 {audio_source}" if audio_source else "缺少 ALIYUN_API_KEY",
         ),
         CommandAvailability(
+            "video",
+            "可用" if video_source else "不可用",
+            "ALIYUN_API_KEY",
+            f"使用 {video_source}" if video_source else "缺少 ALIYUN_API_KEY",
+        ),
+        CommandAvailability(
             "tts",
             tts_status,
             "ALIYUN_API_KEY 或 ZHIPU_API_KEY",
@@ -157,8 +169,14 @@ def get_command_availability() -> list[CommandAvailability]:
         CommandAvailability(
             "image",
             image_status,
-            "ALIYUN_API_KEY；DEEPSEEK_API_KEY 可选",
+            "ALIYUN_API_KEY",
             image_detail,
+        ),
+        CommandAvailability(
+            "music-gen",
+            "可用" if music_gen_source else "不可用",
+            "ALIYUN_API_KEY 或 MINIMAX_API_KEY",
+            music_gen_detail,
         ),
         CommandAvailability(
             "comfyui",
@@ -292,6 +310,37 @@ def check_vision() -> CheckResult:
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
         return CheckResult("Vision", False, f"{type(e).__name__}: {e}", latency)
+
+
+def check_video() -> CheckResult:
+    """测试 Qwen3-VL 视频理解 API（发送最简短文本请求验证连通性）。"""
+    if not _key_source("ALIYUN_API_KEY"):
+        return CheckResult("Video (Qwen3-VL)", False, "未配置 ALIYUN_API_KEY")
+
+    try:
+        api_key, base_url, model = get_video_config()
+    except SystemExit:
+        return CheckResult("Video (Qwen3-VL)", False, "未配置 ALIYUN_API_KEY")
+
+    t0 = time.time()
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=30)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "1+1=?"}],
+            max_tokens=5,
+        )
+        latency = int((time.time() - t0) * 1000)
+        content = resp.choices[0].message.content or ""
+        return CheckResult(
+            "Video (Qwen3-VL)",
+            True,
+            f"model={model} url={base_url} resp={content[:30]}",
+            latency,
+        )
+    except Exception as e:
+        latency = int((time.time() - t0) * 1000)
+        return CheckResult("Video (Qwen3-VL)", False, f"{type(e).__name__}: {e}", latency)
 
 
 def check_image() -> CheckResult:
@@ -462,6 +511,7 @@ CHECK_MAP: dict[str, callable] = {
     "audio": check_audio,
     "qwen-tts": check_qwen_tts,
     "vision": check_vision,
+    "video": check_video,
     "image": check_image,
     "gpt-image": check_gpt_image,
     "proxy": check_proxy,

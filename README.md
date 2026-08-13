@@ -34,9 +34,11 @@ opc bili             B站视频下载 + ASR 转写 + 内容总结
 opc douyin           抖音视频下载为 MP4
 opc asr              语音识别：音频 → SRT/JSON 字幕
 opc audio            音乐理解：使用 Qwen3-Omni Captioner 分析音频
+opc music-gen        音乐生成：使用阿里云 Fun-Music 生成歌曲或纯音乐
 opc tts              文字转语音（支持音色克隆）
 opc local-tts        本地语音合成 + 服务管理（Qwen3-TTS）
 opc read-img         图片理解：使用视觉模型分析图片内容
+opc video            视频理解：使用 Qwen3-VL 分析视频和镜头运动
 opc gpt-img          GPT-Image-2 文生图
 opc image            阿里云 Qwen Image 3.0 文生图或图像编辑
 opc comfyui          ComfyUI 进程管理 + 工作流提交
@@ -51,9 +53,12 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 
 | 环境变量 | 用途 | 涉及命令 |
 |---|---|---|
-| `DEEPSEEK_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | DeepSeek 通用 LLM（总结/日报/提示词丰富） | bili, news, asr --llm-fix, gpt-img, image, check-api |
+| `DEEPSEEK_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | DeepSeek 通用 LLM（总结/日报/提示词丰富） | bili, news, asr --llm-fix, gpt-img, check-api |
 | `ZHIPU_API_KEY` / `ZHIPU_BASE_URL` | 智谱 API（GLM-TTS、音色克隆、视觉模型） | tts --engine glm-tts, read-img, check-api |
-| `ALIYUN_API_KEY` / `ASR_MODEL` / `QWEN_TTS_MODEL` / `IMAGE_MODEL` / `AUDIO_MODEL` | 阿里云 DashScope 统一凭证：ASR、CosyVoice TTS、Qwen Image 3.0、Qwen3-Omni 音乐理解 | asr, bili, tts (默认), image, audio |
+| `ALIYUN_API_KEY` / `ASR_MODEL` / `QWEN_TTS_MODEL` / `IMAGE_MODEL` / `AUDIO_MODEL` / `VIDEO_MODEL` | 阿里云 DashScope 统一凭证：ASR、CosyVoice TTS、Qwen Image 3.0、Qwen3-Omni 音乐理解、Qwen3-VL 视频理解 | asr, bili, tts (默认), image, audio, video, music-gen (aliyun) |
+| `VIDEO_BASE_URL` / `VIDEO_MODEL` | Qwen3-VL 视频理解的 OpenAI 兼容接口和模型 | video |
+| `MUSIC_GEN_PROVIDER` / `MUSIC_GEN_MODEL` / `MUSIC_GEN_WORKSPACE_ID` / `MUSIC_GEN_BASE_URL` | 阿里云 Fun-Music 音乐生成配置 | music-gen --provider aliyun |
+| `MINIMAX_API_KEY` / `MINIMAX_MUSIC_MODEL` / `MINIMAX_MUSIC_BASE_URL` | MiniMax Music 音乐生成配置 | music-gen --provider minimax |
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
 | `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
 | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | bili, douyin |
@@ -422,6 +427,39 @@ opc read-img ui.png -p "每个控件的相对位置和像素大小是什么"
 
 ---
 
+## video — Qwen3-VL 视频理解
+
+使用阿里云 DashScope 的 Qwen3-VL 分析视频内容、镜头运动、构图、主体动作和时间线。API Key 使用 `.env` 中的 `ALIYUN_API_KEY`，默认模型为 `qwen3-vl-235b-a22b-instruct`。
+
+### 使用范例
+
+```bash
+# 分析本地视频
+opc video ./input/video.mp4
+
+# 重点分析运镜并保存结果
+opc video ./input/video.mp4 -p "按时间段分析镜头运动、景别、推拉摇移和主体动作" -o ./output/video-analysis.txt
+
+# 分析模型能够直接访问的远程视频 URL
+opc video "https://example.com/video.mp4"
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `video` | | | 本地视频路径或可直接访问的视频 URL |
+| `--prompt` | `-p` | 分析内容、镜头运动、构图、动作和时间线 | 提问内容 |
+| `--output` | `-o` | 终端输出 | 将结果保存到 UTF-8 文本文件 |
+| `--model` | | `.env` 的 `VIDEO_MODEL` | Qwen3-VL 模型名称 |
+| `--max-tokens` | | `4096` | 最大输出 token 数 |
+| `--temperature` | | `0.7` | 生成温度 [0, 1] |
+| `--env-file` | | | 自定义 `.env` 文件路径 |
+
+本地视频会编码为 `data:` URI 后发送；X/Bilibili 帖子页面 URL 不是直接视频 URL，需要先下载视频再调用此命令。
+
+---
+
 ## audio — 音乐理解
 
 使用阿里云 `qwen3-omni-30b-a3b-captioner` 分析本地音频，自动描述曲风、乐器、音色、情绪、氛围和段落结构。API Key 从 `.env` 的 `ALIYUN_API_KEY` 读取。
@@ -526,9 +564,61 @@ opc gpt-img "测试图" --no-download
 
 ---
 
+## music-gen — 阿里云 Fun-Music / MiniMax Music
+
+`opc music-gen` 支持两个音乐服务商：阿里云 Fun-Music，以及 MiniMax Music 3.0。默认使用阿里云；使用 `--provider minimax` 或设置 `MUSIC_GEN_PROVIDER=minimax` 切换到 MiniMax 的 `music-3.0-free`。
+
+阿里云根据音乐风格/场景提示词或自定义歌词生成完整歌曲，也可以生成纯音乐。`fun-music-v1` 支持男声/女声；`fun-music-preview` 需要提示词且不支持声音性别参数。MiniMax `music-3.0-free` 支持歌曲、纯音乐和 AI 歌词优化，默认限制为 3 RPM。
+
+Fun-Music 使用 `ALIYUN_API_KEY`，MiniMax 使用 `MINIMAX_API_KEY`。MiniMax 中国区默认 API 地址为 `https://api.minimaxi.com`，国际区可配置为 `https://api.minimax.io`。
+
+### 使用范例
+
+```bash
+# 阿里云 Fun-Music（默认）
+opc music-gen "夏日清新民谣，木吉他与口琴伴奏，适合旅行 Vlog" --gender female -o summer.mp3
+
+# 从歌词文件生成歌曲
+opc music-gen --lyrics-file lyrics.txt --gender male -o song.wav --format wav
+
+# 生成纯音乐
+opc music-gen "宁静的钢琴曲，适合深夜阅读的背景音乐" --instrumental -o reading.mp3
+
+# MiniMax Music 3.0 Free：根据风格描述自动生成歌词
+opc music-gen --provider minimax "梦幻电子流行，明亮女声，适合夜晚城市漫步" -o minimax-song.mp3
+
+# MiniMax Music 3.0 Free：使用自定义歌词
+opc music-gen --provider minimax \
+  --lyrics-file lyrics.txt \
+  --model music-3.0-free \
+  -o minimax-with-lyrics.mp3
+
+# MiniMax 纯音乐
+opc music-gen --provider minimax "电影感钢琴与弦乐，逐渐推进，温暖收束" \
+  --instrumental -o minimax-instrumental.mp3
+```
+
+### 参数
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `prompt` | | | 音乐风格、场景和情绪描述；与 `--lyrics`/`--lyrics-file` 至少提供一个 |
+| `--lyrics` | | | 自定义歌词；同时提供 prompt 时歌词优先 |
+| `--lyrics-file` | | | 从 UTF-8 文本文件读取自定义歌词 |
+| `--provider` | | `.env` 的 `MUSIC_GEN_PROVIDER` 或 `aliyun` | `aliyun` / `minimax` |
+| `--gender` | | `female` | `female` / `male`，仅阿里云 `fun-music-v1` 的歌曲模式生效 |
+| `--instrumental` | | `false` | 生成纯音乐，忽略歌词和声音性别 |
+| `--model` | | 由服务商配置决定 | 阿里云：`fun-music-v1` / `fun-music-preview`；MiniMax：`music-3.0` / `music-3.0-free` |
+| `--lyrics-optimizer` | | MiniMax 无歌词时自动启用 | 根据 prompt 自动生成歌词；可用 `--no-lyrics-optimizer` 关闭 |
+| `--format` | | `mp3` | 输出格式：`mp3` / `wav` |
+| `--output` | `-o` | 自动生成 | 输出音频路径 |
+| `--env-file` | | | 自定义 `.env` 文件路径 |
+
+两个服务商的接口返回临时音频 URL，命令会自动下载到本地；如需保存歌词，请使用 `--lyrics` 或 `--lyrics-file` 保留输入内容。MiniMax `music-3.0-free` 的免费 API 速率限制为 3 RPM。
+
 ## image — Qwen Image 3.0 文生图与图像编辑
 
-使用阿里云 DashScope 的 Qwen Image 3.0 模型进行文生图或图像编辑，默认使用 DeepSeek 丰富提示词。
+使用阿里云 DashScope 的 Qwen Image 3.0 模型进行文生图或图像编辑，提示词直接发送给 Qwen Image。可通过 `--prompt-extend` 控制 Qwen Image 自身的提示词改写。
 
 ### 使用范例
 
@@ -554,9 +644,6 @@ opc image "横版风景" -s 16:9
 # 指定像素分辨率
 opc image "高清图" -s 2048*2048
 
-# 不使用 LLM 丰富提示词
-opc image "a cute cat" --no-enhance
-
 # 启用智能提示词改写（会增加时间和费用）
 opc image "风景" --prompt-extend
 
@@ -578,7 +665,6 @@ opc image "测试图" --no-download
 | `--image` | `-i` | | 编辑输入图片，可重复指定，最多 3 张 |
 | `--negative-prompt` | | | 负向提示词 |
 | `--n` | | `1` | 生成张数（1~6） |
-| `--enhance` | | `true` | 使用 DeepSeek 丰富提示词 |
 | `--prompt-extend` | | `true` | 启用 Qwen Image 智能提示词改写 |
 | `--seed` | | 随机 | 随机种子（0~2147483647） |
 | `--watermark` | | `false` | 是否添加水印 |
@@ -767,7 +853,7 @@ opc aigate --release --instance INSTANCE_ID
 命令状态分为：
 
 - **可用**：命令的主要功能所需配置齐全。
-- **部分可用**：命令仍有部分模式可用，例如 `bili --audio-only` 或 `image --no-enhance`。
+- **部分可用**：命令仍有部分模式可用，例如 `bili --audio-only`。
 - **不可用**：缺少该命令所需的 API Key 或 Token。
 
 检查只会显示正在使用的环境变量名，不会打印 API Key 内容。缺少凭证时会直接显示配置问题，不会因为配置读取函数退出而产生重复错误提示。
@@ -781,6 +867,9 @@ opc check-api
 # 只检查 DeepSeek 和 Vision
 opc check-api --only deepseek --only vision
 
+# 只检查 Qwen3-VL 视频理解
+opc check-api --only video
+
 # 只检查文生图相关
 opc check-api --only image --only gpt-image
 
@@ -790,7 +879,7 @@ opc check-api --env-file /path/to/.env
 
 ### 可检查的 API 名称
 
-`deepseek`（兼容别名 `llm`）/ `zhipu` / `asr` / `audio` / `qwen-tts` / `vision` / `image` / `gpt-image` / `proxy` / `cookies`
+`deepseek`（兼容别名 `llm`）/ `zhipu` / `asr` / `audio` / `qwen-tts` / `vision` / `video` / `image` / `gpt-image` / `proxy` / `cookies`
 
 ---
 
@@ -842,6 +931,7 @@ opc_cli/
 ├── logger.py       # 日志系统（TeeWriter 双输出）
 ├── bili.py         # B站视频下载 + ASR 转写 + 内容总结
 ├── audio.py        # Qwen3-Omni 音乐理解
+├── video.py        # Qwen3-VL 视频理解
 ├── tts.py          # GLM-TTS 语音合成 + 音色克隆
 ├── local_tts.py    # Qwen3-TTS 本地语音合成
 ├── tts_server.py   # TTS 常驻服务（Flask）

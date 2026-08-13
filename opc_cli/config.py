@@ -131,6 +131,60 @@ def get_audio_config() -> tuple:
     return api_key, model
 
 
+def get_video_config() -> tuple:
+    """获取 Qwen3-VL 视频理解配置，返回 (api_key, base_url, model)。"""
+    api_key = os.environ.get("ALIYUN_API_KEY", "")
+    base_url = os.environ.get("VIDEO_BASE_URL", "").strip()
+    base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model = os.environ.get("VIDEO_MODEL", "").strip()
+    model = model or "qwen3-vl-235b-a22b-instruct"
+
+    if not api_key:
+        print("错误: 未设置 ALIYUN_API_KEY 环境变量")
+        print("请在 .env 文件中添加: ALIYUN_API_KEY=your_aliyun_api_key")
+        sys.exit(1)
+
+    return api_key, base_url.rstrip("/"), model
+
+
+def get_music_gen_config(provider: str = "") -> tuple:
+    """获取音乐生成配置，返回 ``(api_key, base_url, model)``。
+
+    ``aliyun`` 保持原有 Fun-Music 配置；``minimax`` 使用 MiniMax Music
+    Generation API，并默认选择限免模型 ``music-3.0-free``。
+    """
+    selected_provider = (provider or os.environ.get("MUSIC_GEN_PROVIDER", "aliyun")).strip().lower()
+
+    if selected_provider == "aliyun":
+        api_key = os.environ.get("ALIYUN_API_KEY", "")
+        base_url = os.environ.get("MUSIC_GEN_BASE_URL", "").strip()
+        workspace_id = os.environ.get("MUSIC_GEN_WORKSPACE_ID", "").strip()
+        if not base_url and workspace_id:
+            base_url = f"https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1"
+        base_url = base_url or "https://dashscope.aliyuncs.com/api/v1"
+        model = os.environ.get("MUSIC_GEN_MODEL", "fun-music-v1").strip()
+        model = model or "fun-music-v1"
+        key_name = "ALIYUN_API_KEY"
+    elif selected_provider == "minimax":
+        api_key = os.environ.get("MINIMAX_API_KEY", "")
+        base_url = os.environ.get("MINIMAX_MUSIC_BASE_URL", "").strip()
+        base_url = base_url or "https://api.minimaxi.com"
+        model = os.environ.get("MINIMAX_MUSIC_MODEL", "").strip()
+        model = model or "music-3.0-free"
+        key_name = "MINIMAX_API_KEY"
+    else:
+        raise ValueError(
+            f"不支持的音乐服务商: {selected_provider}（支持 aliyun/minimax）"
+        )
+
+    if not api_key:
+        print(f"错误: 未设置 {key_name} 环境变量")
+        print(f"请在 .env 文件中添加: {key_name}=your_api_key")
+        sys.exit(1)
+
+    return api_key, base_url.rstrip("/"), model
+
+
 def get_qwen_tts_config() -> tuple:
     """
     获取阿里云 Qwen TTS（CosyVoice）API 配置，返回 (api_key, model)。
