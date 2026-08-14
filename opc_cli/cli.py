@@ -21,7 +21,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_music_gen_config, get_news_folder, _is_wsl
+from .config import get_api_config, load_env, get_image_config, get_comfyui_config, get_music_gen_config, get_news_folder
 from .bili import asr_transcribe, generate_srt, resegment_asr
 from .audio import (
     AudioUnderstandingError,
@@ -74,14 +74,8 @@ from .aigate import (
 )
 from .text2img import generate_image, download_image
 from .music_gen import download_music, generate_music
-from .gpt_image import (
-    submit_and_wait as _gpt_submit_and_wait,
-    enhance_prompt as _gpt_enhance_prompt,
-    download_image as _gpt_download_image,
-    load_image_as_base64 as _gpt_load_base64,
-    _build_proxies as _gpt_build_proxies,
-    SUPPORTED_SIZES as _GPT_SIZES,
-)
+from .gpt_image import SUPPORTED_SIZES as _GPT_SIZES
+from .codex_image import CodexImageError as _CodexImageError, generate_with_codex as _codex_generate
 
 app = typer.Typer(
     name="opc",
@@ -357,7 +351,7 @@ def image_understand(
 @image_app.command("generate")
 def image_generate(
     prompt: str = typer.Argument(help="提示词（文生图）或编辑指令（--image 时）"),
-    engine: str = typer.Option("qwen", "--engine", help="生成引擎: qwen（阿里云 Qwen Image）/ gpt-image（OpenAI GPT-Image）"),
+    engine: str = typer.Option("qwen", "--engine", help="生成引擎: qwen（阿里云 Qwen Image）/ gpt-image（GPT-Image，经本机 codex CLI 调用）"),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/image_<时间戳>.png）"),
     size: str = typer.Option("2:3", "-s", "--size", help=f"宽高比（如 2:3, 16:9）或像素（如 1024*1536）: {', '.join(_GPT_SIZES)} 等"),
     model: str = typer.Option("", "--model", help="模型名称（qwen 引擎，默认读取 .env IMAGE_MODEL，默认为 qwen-image-3.0）"),
@@ -379,7 +373,7 @@ def image_generate(
     no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """文生图 / 图生图 / 图像编辑：Qwen Image（默认）或 GPT-Image
+    """文生图 / 图生图 / 图像编辑：Qwen Image（默认）或 GPT-Image（经 codex CLI）
 
     qwen 引擎（默认）:
 
@@ -387,11 +381,16 @@ def image_generate(
         opc image generate "把天空改成绚丽的晚霞" --image ./input/landscape.png
         opc image generate "人像" -s 3:4 --seed 42
 
-    gpt-image 引擎（原 gpt-img）:
+    gpt-image 引擎（经 codex CLI）:
 
-        opc image generate "海报" --engine gpt-image -s 16:9 -r 2k
+        opc image generate "海报" --engine gpt-image -s 16:9
         opc image generate "换成赛博朋克风格" --engine gpt-image --ref original.png
         opc image generate "a cute cat" --engine gpt-image --no-enhance
+
+    gpt-image 引擎通过本机 ``codex exec`` 调用：codex 内置 ``image_gen__imagegen``
+    工具（由 gpt-image 驱动），需 codex-cli 0.147+ 并已用 ChatGPT 账号登录。
+    --ref 参考图通过 codex exec --image 附到会话；--enhance 控制是否允许模型
+    优化提示词；--resolution/--quality 等旧 API 参数不再生效。
     """
     load_env(env_file)
     engine = (engine or "qwen").strip().lower()
@@ -411,24 +410,32 @@ def image_generate(
             )
             if value
         ]
+        api_only = [
+            name
+            for name, value in (
+                ("--resolution", resolution if resolution != "1k" else None),
+                ("--quality", quality if quality != "auto" else None),
+                ("--moderation", moderation if moderation != "auto" else None),
+                ("--output-format", output_format if output_format != "png" else None),
+                ("--output-compression", output_compression),
+                ("--proxy", use_proxy or None),
+            )
+            if value
+        ]
         if qwen_only:
             console.print(f"[yellow]提示: 参数 {', '.join(qwen_only)} 仅 qwen 引擎生效，已忽略[/yellow]")
-        return _run_gpt_image(
+        if api_only:
+            console.print(f"[yellow]提示: 参数 {', '.join(api_only)} 仅旧 API 模式生效，codex 模式下已忽略[/yellow]")
+        if no_download:
+            console.print("[yellow]提示: --no-download 无额外效果，codex 模式输出即本地文件[/yellow]")
+        return _run_codex_image(
             prompt=prompt,
             output=output,
             size=size,
             n=n,
-            no_download=no_download,
-            resolution=resolution,
-            quality=quality,
             enhance=enhance,
             ref=ref,
-            output_format=output_format,
-            output_compression=output_compression,
-            moderation=moderation,
-            use_proxy=use_proxy,
             timeout=timeout,
-            env_file=env_file,
         )
 
     gpt_only = [
@@ -545,143 +552,52 @@ def _run_qwen_image(
         raise typer.Exit(1)
 
 
-def _run_gpt_image(
+def _run_codex_image(
     prompt: str,
     output: Optional[str],
     size: str,
     n: int,
-    no_download: bool,
-    resolution: str,
-    quality: str,
     enhance: bool,
     ref: Optional[list[str]],
-    output_format: str,
-    output_compression: Optional[int],
-    moderation: str,
-    use_proxy: bool,
     timeout: int,
-    env_file: Optional[str],
 ):
-    """GPT-Image-2-Official 文生图（image generate 的 gpt-image 引擎，异步轮询）。"""
-    api_key, base_url, cfg_model = get_gpt_image_config()
+    """GPT-Image 文生图（image generate 的 gpt-image 引擎，经本机 codex CLI 调用）。
 
-    # 构建 gpt-image 专用代理（WSL 下自动启用，直连不通）
-    proxies = None
-    if use_proxy or _is_wsl():
-        proxy_url = get_gpt_img_proxy()
-        proxies = _gpt_build_proxies(proxy_url)
-        if proxies:
-            console.print(f"[dim]代理: {proxy_url}[/dim]")
-
-    console.print(f"[bold]=== GPT-Image-2-Official 文生图 ===[/bold]")
-    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-    console.print(f"宽高比: {size} | 分辨率: {resolution} | 质量: {quality} | 张数: {n} | 模型: {cfg_model}")
-
-    # 使用 LLM 丰富提示词
-    use_prompt = prompt
-    use_prompt_json = None
-    if enhance:
-        console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
-        try:
-            llm_key, llm_url, llm_model = get_llm_config()
-            enhanced = _gpt_enhance_prompt(
-                prompt=prompt,
-                llm_api_key=llm_key,
-                llm_base_url=llm_url,
-                llm_model=llm_model,
-                aspect_ratio=size,
-            )
-            use_prompt = enhanced["flat"]
-            use_prompt_json = enhanced["json_str"]
-            console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
-            if use_prompt_json:
-                console.print(f"[cyan]  丰富(JSON): {use_prompt_json[:300]}{'...' if len(use_prompt_json) > 300 else ''}[/cyan]")
-            else:
-                console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
-        except Exception as e:
-            console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
-
-    # 处理参考图
-    image_urls = None
-    if ref:
-        image_urls = []
-        for r in ref:
-            if r.startswith("http://") or r.startswith("https://"):
-                image_urls.append(r)
-            elif r.startswith("data:"):
-                image_urls.append(r)
-            else:
-                try:
-                    data_uri = _gpt_load_base64(r)
-                    image_urls.append(data_uri)
-                    console.print(f"[dim]  参考图: {r} → base64[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]⚠ 参考图加载失败 {r}: {e}[/yellow]")
-        console.print(f"参考图: {len(image_urls)} 张")
-
-    # 提交任务 + 轮询
+    codex 内置 ``image_gen__imagegen`` 工具（由 gpt-image 驱动），
+    需要 codex-cli 0.147+ 并已用 ChatGPT 账号登录。
+    """
     import time as _time
     t0 = _time.time()
 
-    def on_status(status, task_id):
-        console.print(f"[dim]  任务 {task_id} → {status}[/dim]")
+    console.print(f"[bold]=== GPT-Image 文生图（经 codex CLI）===[/bold]")
+    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+    console.print(f"画面比例: {size} | 张数: {n}")
+    if ref:
+        console.print(f"参考图: {len(ref)} 张（作为风格/构图/内容参考）")
+
+    if not output:
+        ts = _time.strftime("%Y%m%d_%H%M%S")
+        output = f"output/gpt_img_{ts}.png"
 
     try:
-        result = _gpt_submit_and_wait(
-            prompt=use_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=cfg_model,
+        saved_paths = _codex_generate(
+            prompt=prompt,
+            output=output,
             size=size,
-            resolution=resolution,
-            quality=quality,
-            image_urls=image_urls,
             n=n,
-            output_format=output_format,
-            output_compression=output_compression,
-            moderation=moderation,
+            ref=ref,
+            enhance=enhance,
             timeout=timeout,
-            on_status=on_status,
-            proxies=proxies,
-            prompt_json=use_prompt_json,
         )
-    except ValueError as e:
-        console.print(f"[red]参数错误: {e}[/red]")
-        raise typer.Exit(1)
-    except RuntimeError as e:
-        console.print(f"[red]生成失败: {e}[/red]")
+    except _CodexImageError as error:
+        console.print(f"[red]生成失败: {error}[/red]")
         raise typer.Exit(1)
 
     elapsed = _time.time() - t0
-    image_url = result.get("image_url")
-
-    if not image_url:
-        console.print("[red]未获取到图片 URL[/red]")
-        raise typer.Exit(1)
-
-    cost = result.get("cost", 0)
-    actual_time = result.get("actual_time", "?")
-    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s, 实际生成: {actual_time}s, 费用: ${cost:.5f})")
-
-    # 输出
-    if no_download:
-        console.print(f"\n图片 URL: {image_url}")
-        console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
-    else:
-        if not output:
-            ts = _time.strftime("%Y%m%d_%H%M%S")
-            output = f"output/gpt_img_{ts}.{output_format}"
-
-        try:
-            saved = _gpt_download_image(image_url, output, proxies=proxies)
-            file_size = Path(saved).stat().st_size
-            console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
-        except Exception as e:
-            console.print(f"[red]下载失败: {e}[/red]")
-            console.print(f"图片 URL（有效期 24 小时）: {image_url}")
-            raise typer.Exit(1)
-
-    console.print(f"[dim]URL: {image_url}[/dim]")
+    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s)")
+    for path in saved_paths:
+        file_size = Path(path).stat().st_size
+        console.print(f"[green]已保存:[/green] {path} ({file_size / 1024:.0f} KB)")
 
 
 # ── video 模态 ─────────────────────────────────────────────────

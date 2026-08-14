@@ -501,7 +501,10 @@ opc music beats Hypervoid.m4a --beat-strength-threshold 0.35 --beat-min-interval
 
 ## image generate — 文生图 / 图生图 / 图像编辑
 
-两个生成引擎统一入口：默认 `--engine qwen`（阿里云 Qwen Image 3.0），`--engine gpt-image` 切换为 GPT-Image-2-Official（OpenAI 官方模型，异步接口）。qwen 引擎支持文生图和图像编辑（`--image`）；gpt-image 引擎支持文生图/图生图（`--ref`）和批量生成，默认使用 LLM 丰富提示词。
+两个生成引擎统一入口：默认 `--engine qwen`（阿里云 Qwen Image 3.0），`--engine gpt-image` 切换为 GPT-Image（经本机 codex CLI 调用）。qwen 引擎支持文生图和图像编辑（`--image`）；gpt-image 引擎支持文生图/图生图（`--ref`）和批量生成（`--n`）。
+
+> **`image-gen` 生成图像（codex + gpt-image）**
+> gpt-image 引擎统一使用本机 `codex exec` 生成：codex 内置 `image_gen__imagegen` 工具（由 gpt-image 驱动，需 ChatGPT 账号登录，本机已验证 codex-cli 0.147+ 可用）。图片由 codex 保存到本地路径，不再依赖 `GPT_IMAGE_API_KEY`。
 
 ### 使用范例
 
@@ -535,30 +538,23 @@ opc image generate "测试" --seed 42
 # 仅返回图片 URL
 opc image generate "测试图" --no-download
 
-# ── gpt-image 引擎（OpenAI GPT-Image-2-Official）──
+# ── gpt-image 引擎（经 codex CLI，GPT-Image 驱动）──
 
-# 基本文生图
+# 基本文生图（保存到 output/gpt_img_<时间戳>.png）
 opc image generate "一只穿着宇航服的猫" --engine gpt-image
 
-# 指定宽高比和分辨率
-opc image generate "人像" --engine gpt-image -s 3:4 -r 2k
+# 指定宽高比和输出路径
+opc image generate "人像" --engine gpt-image -s 3:4 -o ./output/portrait.png
 
-# 指定图片质量、输出格式和压缩强度
-opc image generate "海报" --engine gpt-image --quality high
-opc image generate "照片" --engine gpt-image --output-format jpeg --output-compression 85
-
-# 不使用 LLM 丰富提示词
+# 不使用模型提示词优化（默认会优化/丰富提示词）
 opc image generate "a cute cat" --engine gpt-image --no-enhance
 
-# 图生图：指定参考图（可多张）
+# 图生图：指定参考图（可多张，作为风格/构图/内容参考）
 opc image generate "换成赛博朋克风格" --engine gpt-image --ref original.png
 opc image generate "融合这些风格" --engine gpt-image --ref img1.png --ref img2.png
 
-# 批量生成 4 张
-opc image generate "多种方案" --engine gpt-image --n 4
-
-# WSL 下代理自动启用，Windows 下需手动指定
-opc image generate "风景" --engine gpt-image --proxy
+# 批量生成 4 个变体（自动保存为 _1/_2/_3/_4 后缀）
+opc image generate "多种方案" --engine gpt-image --n 4 -o ./output/variants.png
 ```
 
 ### 参数
@@ -566,26 +562,21 @@ opc image generate "风景" --engine gpt-image --proxy
 | 参数 | 简写 | 默认值 | 说明 |
 |---|---|---|---|
 | `prompt` | | | 文生图提示词或编辑指令（中英文） |
-| `--engine` | | `qwen` | 生成引擎：`qwen`（阿里云 Qwen Image）/ `gpt-image`（OpenAI GPT-Image） |
-| `--output` | `-o` | 自动生成 | 输出图片路径 |
+| `--engine` | | `qwen` | 生成引擎：`qwen`（阿里云 Qwen Image）/ `gpt-image`（GPT-Image，经 codex CLI） |
+| `--output` | `-o` | 自动生成 | 输出图片路径（gpt-image 引擎批量时自动加 _1/_2/...） |
 | `--size` | `-s` | `2:3` | 宽高比（如 2:3, 16:9）或像素（如 1024*1536） |
 | `--model` | | `.env` 的 `IMAGE_MODEL` | qwen 引擎模型名称，默认为 `qwen-image-3.0` |
 | `--image` | `-i` | | qwen 引擎编辑输入图片，可重复指定，最多 3 张 |
 | `--negative-prompt` | | | qwen 引擎负向提示词 |
-| `--n` | | `1` | 生成张数（qwen: 1~6；gpt-image: 1~4） |
+| `--n` | | `1` | 生成张数（qwen: 1~6；gpt-image: 1~4 个变体） |
 | `--prompt-extend` | | `true` | qwen 引擎智能提示词改写 |
 | `--seed` | | 随机 | qwen 引擎随机种子（0~2147483647） |
 | `--watermark` | | `false` | qwen 引擎是否添加水印 |
-| `--resolution` | `-r` | `1k` | gpt-image 引擎分辨率档位：1k / 2k / 4k |
-| `--quality` | | `auto` | gpt-image 引擎图片质量：auto / low / medium / high |
-| `--enhance` | | `true` | gpt-image 引擎使用 LLM 丰富提示词 |
-| `--ref` | | | gpt-image 引擎参考图路径或 URL（可多次指定，最多16张） |
-| `--output-format` | | `png` | gpt-image 引擎输出格式：png / jpeg / webp |
-| `--output-compression` | | | gpt-image 引擎压缩强度 0-100（仅 jpeg/webp） |
-| `--moderation` | | `auto` | gpt-image 引擎审核强度：auto / low |
-| `--proxy` | | `false` | gpt-image 引擎代理开关（WSL 下默认启用） |
-| `--timeout` | | `600` | gpt-image 引擎最大等待时间（秒） |
-| `--no-download` | | `false` | 仅返回图片 URL |
+| `--ref` | | | gpt-image 引擎参考图路径（可多次指定，经 codex exec --image 附到会话） |
+| `--enhance` | | `true` | gpt-image 引擎是否允许模型优化/丰富提示词 |
+| `--timeout` | | `600` | gpt-image 引擎 codex exec 最大等待时间（秒） |
+| `--resolution` / `--quality` / `--moderation` / `--output-format` / `--output-compression` / `--proxy` | | | 旧 API 模式参数，codex 模式下已忽略（会提示） |
+| `--no-download` | | `false` | qwen 引擎仅返回图片 URL；gpt-image 引擎无额外效果（输出即本地文件） |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
 ---
@@ -909,7 +900,8 @@ opc_cli/
 ├── comfyui.py      # ComfyUI 进程管理 + 工作流提交
 ├── aigate.py       # 云扉 AIGate ComfyUI 实例管理 + 工作流提交
 ├── check_api.py    # API 连通性检查
-├── gpt_img.py      # GPT-Image-2 文生图
+├── codex_image.py  # GPT-Image 文生图（经本机 codex CLI 的内置 image_gen 工具）
+├── gpt_image.py    # 旧版 GPT-Image API 客户端（已不再被 CLI 使用）
 ├── text2img.py     # 阿里云 Qwen Image 3.0 文生图与图像编辑
 └── ai_daily.py     # AI 日报
 ```

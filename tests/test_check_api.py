@@ -41,7 +41,9 @@ class CheckApiTests(unittest.TestCase):
             "GPT_IMAGE_API_KEY": "gpt-image-test-key",
             "AIGATE_TOKEN": "aigate-test-token",
         }
-        with patch.dict(os.environ, env, clear=True):
+        with patch.dict(os.environ, env, clear=True), patch(
+            "opc_cli.check_api._codex_available", return_value=True
+        ):
             availability = {
                 item.command: item for item in get_command_availability()
             }
@@ -195,7 +197,9 @@ class CheckApiTests(unittest.TestCase):
             "IMAGE_API_KEY": "old-image-key",
             "QWEN_TTS_API_KEY": "old-tts-key",
         }
-        with patch.dict(os.environ, env, clear=True):
+        with patch.dict(os.environ, env, clear=True), patch(
+            "opc_cli.check_api._codex_available", return_value=False
+        ):
             availability = {
                 item.command: item for item in get_command_availability()
             }
@@ -205,6 +209,17 @@ class CheckApiTests(unittest.TestCase):
         self.assertEqual(availability["image generate"].status, "不可用")
         self.assertEqual(availability["music generate"].status, "不可用")
         self.assertEqual(availability["speech tts"].status, "不可用")
+
+    def test_codex_cli_alone_enables_gpt_image_engine(self):
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "opc_cli.check_api._codex_available", return_value=True
+        ):
+            availability = {
+                item.command: item for item in get_command_availability()
+            }
+
+        self.assertEqual(availability["image generate"].status, "部分可用")
+        self.assertIn("codex CLI", availability["image generate"].detail)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """API 连通性检查：逐个测试 .env 中配置的所有 API"""
 
 import os
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -16,9 +17,9 @@ from .config import (
     get_vision_config,
     get_video_config,
     get_image_config,
-    get_gpt_image_config,
     get_gpt_img_proxy,
 )
+from .codex_image import codex_available as _codex_available
 
 
 # ── 检查结果 ──────────────────────────────────────────────────────
@@ -76,7 +77,7 @@ def get_command_availability() -> list[CommandAvailability]:
     video_source = _key_source("ALIYUN_API_KEY")
     minimax_music_source = _key_source("MINIMAX_API_KEY")
     music_gen_source = _key_source("ALIYUN_API_KEY", "MINIMAX_API_KEY")
-    gpt_image_source = _key_source("GPT_IMAGE_API_KEY")
+    codex_available_ = _codex_available()
     aigate_source = _key_source("AIGATE_TOKEN")
     comfyui_source = _key_source("COMFYUI_ROOT")
 
@@ -108,17 +109,17 @@ def get_command_availability() -> list[CommandAvailability]:
         music_gen_detail = "缺少 ALIYUN_API_KEY 和 MINIMAX_API_KEY"
 
     image_gen_status = "不可用"
-    if image_source and gpt_image_source:
+    if image_source and codex_available_:
         image_gen_status = "可用"
-        image_gen_detail = "Qwen Image + GPT-Image 双引擎均可用"
+        image_gen_detail = "Qwen Image + GPT-Image（经 codex CLI）双引擎均可用"
     elif image_source:
         image_gen_status = "部分可用"
-        image_gen_detail = "仅 Qwen Image 引擎可用（--engine qwen）；缺少 GPT_IMAGE_API_KEY"
-    elif gpt_image_source:
+        image_gen_detail = "仅 Qwen Image 引擎可用（--engine qwen）；缺少 codex CLI（需 0.147+ 并登录 ChatGPT）"
+    elif codex_available_:
         image_gen_status = "部分可用"
-        image_gen_detail = "仅 GPT-Image 引擎可用（--engine gpt-image）；缺少 ALIYUN_API_KEY"
+        image_gen_detail = "仅 GPT-Image 引擎可用（--engine gpt-image，经 codex CLI）；缺少 ALIYUN_API_KEY"
     else:
-        image_gen_detail = "缺少 ALIYUN_API_KEY 和 GPT_IMAGE_API_KEY"
+        image_gen_detail = "缺少 ALIYUN_API_KEY 与 codex CLI（gpt-image 引擎需要）"
 
     return [
         CommandAvailability(
@@ -151,7 +152,7 @@ def get_command_availability() -> list[CommandAvailability]:
         CommandAvailability(
             "image generate",
             image_gen_status,
-            "ALIYUN_API_KEY 或 GPT_IMAGE_API_KEY",
+            "ALIYUN_API_KEY 或 codex CLI",
             image_gen_detail,
         ),
         CommandAvailability(
@@ -381,36 +382,29 @@ def check_image() -> CheckResult:
 
 
 def check_gpt_image() -> CheckResult:
-    """测试 GPT-Image API（验证 key 和 base_url 连通性，自动使用代理）"""
-    if not _key_source("GPT_IMAGE_API_KEY"):
-        return CheckResult("GPT-Image", False, "未配置 GPT_IMAGE_API_KEY")
+    """检查 GPT-Image 引擎（经本机 codex CLI 驱动）是否可用。
 
-    try:
-        api_key, base_url, model = get_gpt_image_config()
-    except SystemExit:
-        return CheckResult("GPT-Image", False, "未配置 GPT_IMAGE_API_KEY")
-
-    # 构建代理
-    proxy_url = get_gpt_img_proxy()
-    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    gpt-image 引擎不再直接调用 OpenAI 兼容 API，而是通过 codex exec 的
+    内置 image_gen 工具生成（需 codex-cli 0.147+ 并已用 ChatGPT 账号登录）。
+    """
+    if not _codex_available():
+        return CheckResult(
+            "GPT-Image (codex)",
+            False,
+            "未安装 codex CLI（需要 0.147+，且已用 ChatGPT 账号登录）",
+        )
 
     t0 = time.time()
     try:
-        # 尝试调用 models 接口验证 key
-        url = f"{base_url}/models"
-        headers = {"Authorization": f"Bearer {api_key}"}
-        resp = requests.get(url, headers=headers, timeout=15, proxies=proxies)
+        result = subprocess.run(
+            ["codex", "--version"], capture_output=True, text=True, timeout=15
+        )
         latency = int((time.time() - t0) * 1000)
-
-        if resp.status_code == 401:
-            return CheckResult("GPT-Image", False, f"认证失败 (401) url={base_url}", latency)
-        elif resp.status_code == 200:
-            return CheckResult("GPT-Image", True, f"model={model} url={base_url}", latency)
-        else:
-            return CheckResult("GPT-Image", True, f"model={model} url={base_url} HTTP={resp.status_code}", latency)
+        version = (result.stdout or result.stderr).strip()
+        return CheckResult("GPT-Image (codex)", True, f"codex {version}", latency)
     except Exception as e:
         latency = int((time.time() - t0) * 1000)
-        return CheckResult("GPT-Image", False, f"{type(e).__name__}: {e}", latency)
+        return CheckResult("GPT-Image (codex)", False, f"{type(e).__name__}: {e}", latency)
 
 
 def _check_dashscope_key(

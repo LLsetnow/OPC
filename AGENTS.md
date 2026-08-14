@@ -25,7 +25,7 @@
 | 图片理解/分析 | `opc image understand image.png` | 支持本地图片和URL，自动压缩超大图 |
 | 自定义图片提问 | `opc image understand image.png -p "问题"` | 如分析UI控件位置 |
 | 文生图(阿里云Qwen) | `opc image generate "描述"` | Qwen Image 3.0 文生图/图生图/图像编辑 |
-| 文生图(GPT-Image) | `opc image generate "描述" --engine gpt-image` | OpenAI 官方模型，支持图生图、宽高比、分辨率 |
+| 文生图(GPT-Image) | `opc image generate "描述" --engine gpt-image` | 经本机 codex CLI 的内置 image_gen 工具调用（gpt-image 驱动，需 ChatGPT 登录） |
 | API连通性检查 | `opc check-api` | 检查.env中各API可用性 |
 | AI日报 | `opc news` | 自动收集AI新闻生成简报 |
 | ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |

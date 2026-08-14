@@ -87,53 +87,78 @@ class EngineDispatchTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertEqual(generate.call_args.kwargs["model"], "qwen-image-3.0")
 
-    def test_image_generate_gpt_engine(self):
-        with patch("opc_cli.cli.load_env"), patch(
-            "opc_cli.cli.get_gpt_image_config",
-            return_value=("key", "https://api.example.com", "gpt-image-2"),
-        ), patch(
-            "opc_cli.cli._gpt_submit_and_wait",
-            return_value={"image_url": "https://example.com/gpt.png"},
-        ):
-            result = CliRunner().invoke(
-                cli.app,
-                [
-                    "image",
-                    "generate",
-                    "海报",
-                    "--engine",
-                    "gpt-image",
-                    "--no-enhance",
-                    "--no-download",
-                ],
+    def test_image_generate_gpt_engine_via_codex(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output_file = Path(temporary) / "gpt.png"
+            output_file.write_bytes(b"png")
+            with patch("opc_cli.cli.load_env"), patch(
+                "opc_cli.cli._codex_generate", return_value=[str(output_file)]
+            ) as generate:
+                result = CliRunner().invoke(
+                    cli.app,
+                    [
+                        "image",
+                        "generate",
+                        "海报",
+                        "--engine",
+                        "gpt-image",
+                        "--no-enhance",
+                        "-o",
+                        str(output_file),
+                    ],
+                )
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertIn(str(output_file), result.output)
+            self.assertEqual(
+                generate.call_args.kwargs,
+                {
+                    "prompt": "海报",
+                    "output": str(output_file),
+                    "size": "2:3",
+                    "n": 1,
+                    "enhance": False,
+                    "ref": None,
+                    "timeout": 600,
+                },
             )
-        self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("https://example.com/gpt.png", result.output)
 
     def test_image_generate_ignores_qwen_only_flags_with_gpt_engine(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output_file = Path(temporary) / "gpt.png"
+            output_file.write_bytes(b"png")
+            with patch("opc_cli.cli.load_env"), patch(
+                "opc_cli.cli._codex_generate", return_value=[str(output_file)]
+            ):
+                result = CliRunner().invoke(
+                    cli.app,
+                    [
+                        "image",
+                        "generate",
+                        "海报",
+                        "--engine",
+                        "gpt-image",
+                        "--no-enhance",
+                        "--no-download",
+                        "--seed",
+                        "42",
+                        "-o",
+                        str(output_file),
+                    ],
+                )
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertIn("仅 qwen 引擎生效", result.output)
+
+    def test_image_generate_gpt_engine_failure_raises(self):
         with patch("opc_cli.cli.load_env"), patch(
-            "opc_cli.cli.get_gpt_image_config",
-            return_value=("key", "https://api.example.com", "gpt-image-2"),
-        ), patch(
-            "opc_cli.cli._gpt_submit_and_wait",
-            return_value={"image_url": "https://example.com/gpt.png"},
+            "opc_cli.cli._codex_generate",
+            side_effect=cli._CodexImageError("codex exec 超时"),
         ):
             result = CliRunner().invoke(
                 cli.app,
-                [
-                    "image",
-                    "generate",
-                    "海报",
-                    "--engine",
-                    "gpt-image",
-                    "--no-enhance",
-                    "--no-download",
-                    "--seed",
-                    "42",
-                ],
+                ["image", "generate", "海报", "--engine", "gpt-image", "--no-enhance"],
             )
-        self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("仅 qwen 引擎生效", result.output)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("codex exec 超时", result.output)
 
 
 if __name__ == "__main__":
