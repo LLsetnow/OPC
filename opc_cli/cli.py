@@ -1,4 +1,8 @@
-"""OPC CLI 入口：B站视频转写 + 音视频理解 + 语音合成 + 图片理解 + 文生图"""
+"""OPC CLI 入口：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解 + 语音合成/识别。
+
+命令层级：第一级 = 模态（media/music/image/video/speech），第二级 = 动词（download/generate/understand/beats/tts/asr）。
+local-tts / news / check-api / comfyui / aigate 保持一级命令。
+"""
 
 import os
 import sys
@@ -17,8 +21,8 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_bili_folder, get_douyin_folder, get_x_folder, get_news_folder, get_music_folder, get_music_gen_config, _is_wsl
-from .bili import run_bili, asr_transcribe, generate_srt, resegment_asr
+from .config import get_api_config, load_env, get_image_config, get_llm_config, get_gpt_image_config, get_gpt_img_proxy, get_comfyui_config, get_music_gen_config, get_news_folder, _is_wsl
+from .bili import asr_transcribe, generate_srt, resegment_asr
 from .audio import (
     AudioUnderstandingError,
     analyze_audio,
@@ -26,10 +30,7 @@ from .audio import (
     filter_beat_events,
     format_librosa_analysis,
 )
-from .douyin import DouyinDownloadError, download_video as download_douyin_video
-from .x import XDownloadError, download_video as download_x_video
-from .music import run_music
-from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
+from .media import MediaError, download_media as _download_media
 from .local_tts import (
     load_model as _local_load_model,
     generate_custom_voice as _local_custom_voice,
@@ -50,6 +51,7 @@ from .tts_server import (
     _read_pid_info as _read_tts_pid_info,
     DEFAULT_PORT as _TTS_DEFAULT_PORT,
 )
+from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .vision import understand_image
 from .video import VideoUnderstandingError, understand_video
 from .ai_daily import run_ai_daily
@@ -83,162 +85,160 @@ from .gpt_image import (
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：B站视频转写 + 音乐理解/生成/下载 + 语音合成 + 图片理解 + 文生图/图像编辑 + ComfyUI + 云扉 AIGate",
+    help="OPC 工具集：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解 + 语音合成/识别 + 本地TTS + ComfyUI + 云扉 AIGate",
     add_completion=False,
     no_args_is_help=True,
 )
 console = Console()
 
-# ── bili 子命令 ────────────────────────────────────────────────────
+# ── 模态子应用（第一级 = 模态，第二级 = 动词） ──────────────────
 
-@app.command()
-def bili(
-    url: str = typer.Argument("", help="Bilibili 视频链接（--skip-download 时可省略）"),
-    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env BILI_FOLDER 读取，或 ./output）"),
+media_app = typer.Typer(help="媒体下载/总结（B站/抖音/X/网易云，URL 自动识别平台）", no_args_is_help=True)
+music_app = typer.Typer(help="音乐：理解 / 鼓点检测 / 生成", no_args_is_help=True)
+image_app = typer.Typer(help="图片：理解 / 生成（文生图、图生图、编辑）", no_args_is_help=True)
+video_app = typer.Typer(help="视频：理解", no_args_is_help=True)
+speech_app = typer.Typer(help="语音：合成（TTS）/ 识别（ASR）", no_args_is_help=True)
+
+app.add_typer(media_app, name="media")
+app.add_typer(music_app, name="music")
+app.add_typer(image_app, name="image")
+app.add_typer(video_app, name="video")
+app.add_typer(speech_app, name="speech")
+
+
+# ── media download ─────────────────────────────────────────────
+
+@media_app.command("download")
+def media_download(
+    url: str = typer.Argument(..., help="媒体链接：B站 / 抖音 / X / 网易云，自动识别平台"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认按平台从 .env 读取 BILI_FOLDER/DOUYIN_FOLDER/X_FOLDER/MUSIC_FOLDER，或 ./output）"),
     cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
-    audio_only: bool = typer.Option(False, "--audio-only", help="下载音频并转为 MP3，不进行 ASR"),
-    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps，仅 --audio-only 生效)"),
-    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 MP3 的 ID3 元数据写入（仅 --audio-only 生效）"),
-    skip_download: bool = typer.Option(False, "--skip-download", help="跳过下载，使用已有音频文件"),
-    audio_file: Optional[str] = typer.Option(None, "--audio-file", help="指定已有音频文件路径"),
-    skip_asr: bool = typer.Option(False, "--skip-asr", help="跳过 ASR，使用已有字幕文件生成总结"),
-    asr_file: Optional[str] = typer.Option(None, "--asr-file", help="指定已有 ASR JSON 或 SRT 文件路径"),
+    audio_only: bool = typer.Option(False, "--audio-only", help="仅下载音频并转为 MP3（仅 bilibili 生效）"),
+    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps，--audio-only 或网易云时生效)"),
+    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 MP3 的 ID3 元数据写入"),
+    playlist: bool = typer.Option(False, "--playlist", help="下载全部曲目（网易云专辑/歌单/歌手链接默认已启用）"),
+    summarize: bool = typer.Option(False, "--summarize", help="下载音频 → ASR 转写 → 内容总结（B站/抖音/X 通用）"),
+    skip_download: bool = typer.Option(False, "--skip-download", help="跳过下载，使用已有音频文件（需 --summarize）"),
+    audio_file: Optional[str] = typer.Option(None, "--audio-file", help="指定已有音频文件路径（需 --summarize）"),
+    skip_asr: bool = typer.Option(False, "--skip-asr", help="跳过 ASR，使用已有字幕文件生成总结（需 --summarize）"),
+    asr_file: Optional[str] = typer.Option(None, "--asr-file", help="指定已有 ASR JSON 或 SRT 文件路径（需 --summarize）"),
     llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """B站视频下载 + ASR 转写 + 内容总结
+    """统一媒体下载：URL 自动识别平台（bilibili / douyin / x / netease）
 
-    自动检测：视频目录下已有字幕文件则跳过ASR。
+    下载（默认）:
+
+        opc media download "https://www.douyin.com/video/xxx"   # 抖音 MP4
+        opc media download "https://music.163.com/song?id=xxx"  # 网易云 MP3
+        opc media download "https://www.bilibili.com/video/BV1xx"  # B站音频
+
+    B站完整流水线（下载 → ASR 转写 → 内容总结，多平台通用）:
+
+        opc media download "URL" --summarize
+
+    B站音频转 MP3（含 ID3 元数据）:
+
+        opc media download "URL" --audio-only --bitrate 320
     """
     load_env(env_file)
 
-    if output_dir is None:
-        output_dir = get_bili_folder() or "./output"
-
-    if not url and not skip_download:
-        console.print("[red]错误: 请提供 Bilibili 视频链接，或使用 --skip-download 跳过下载[/red]")
-        raise typer.Exit(1)
-
-    run_bili(
-        url=url,
-        output_dir=output_dir,
-        cookies=cookies,
-        audio_only=audio_only,
-        skip_download=skip_download,
-        audio_file=audio_file,
-        skip_asr=skip_asr,
-        asr_file=asr_file,
-        llm_fix=llm_fix,
-        bitrate=bitrate,
-        no_metadata=no_metadata,
-    )
-
-
-# ── douyin 子命令 ────────────────────────────────────────────────
-
-@app.command()
-def douyin(
-    url: str = typer.Argument(..., help="抖音视频链接"),
-    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env DOUYIN_FOLDER 读取，或 ./output）"),
-    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-):
-    """下载单个抖音视频为 MP4。"""
-    load_env(env_file)
-    output_dir = output_dir or get_douyin_folder() or "./output"
-    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
-
     try:
-        output_path = download_douyin_video(url, output_dir, cookies)
-    except DouyinDownloadError as error:
+        _download_media(
+            url=url,
+            output_dir=output_dir or "",
+            cookies=cookies,
+            audio_only=audio_only,
+            bitrate=bitrate,
+            no_metadata=no_metadata,
+            playlist=playlist,
+            summarize=summarize,
+            skip_download=skip_download,
+            audio_file=audio_file,
+            skip_asr=skip_asr,
+            asr_file=asr_file,
+            llm_fix=llm_fix,
+        )
+    except (MediaError, FileNotFoundError, RuntimeError) as error:
         console.print(f"[red]错误: {error}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]完成![/green] 已保存 MP4: {output_path}")
+
+# ── music 模态 ─────────────────────────────────────────────────
+
+def _save_audio_result(result: str, output: Optional[str]) -> None:
+    """输出音乐分析结果，可选保存到文本文件。"""
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(result + "\n", encoding="utf-8")
+        console.print(f"结果已保存: {output_path}")
+    console.print("\n" + result)
 
 
-# ── x 子命令 ─────────────────────────────────────────────────────
-
-@app.command("x")
-def x(
-    url: str = typer.Argument(..., help="X (Twitter) 视频/帖子链接"),
-    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env X_FOLDER 读取，或 ./output）"),
-    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径（X 视频通常需要登录 cookies）"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+@music_app.command("understand")
+def music_understand(
+    audio: str = typer.Argument(..., help="输入音频路径（.m4a/.mp3/.wav 等）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="将分析结果保存到文本文件"),
+    model: str = typer.Option("", "--model", help="音乐理解模型（默认读取 .env AUDIO_MODEL，默认为 qwen3-omni-30b-a3b-captioner）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
 ):
-    """下载单个 X (Twitter) 视频为 MP4。
-
-    X 大量视频对未登录用户不可见。若报 "No video could be found"，
-    请用 --cookies 传入从浏览器导出的 cookies.txt（或设置环境变量 YT_DLP_COOKIES）。
+    """音乐理解：使用 Qwen3-Omni Captioner 分析曲风、乐器、情绪和结构。
 
     示例:
 
-        opc x "https://x.com/i/status/2038177089082261736"
-
-        opc x "URL" --cookies ~/cookies.txt -o ~/Downloads
+        opc music understand song.m4a
+        opc music understand song.m4a -o song.analysis.txt
     """
     load_env(env_file)
-    output_dir = output_dir or get_x_folder() or "./output"
-    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
+    audio_path = Path(audio)
+    console.print("[bold]=== 音乐理解 ===[/bold]")
+    console.print(f"输入: {audio_path}")
 
     try:
-        output_path = download_x_video(url, output_dir, cookies)
-    except XDownloadError as error:
+        result = analyze_audio(str(audio_path), model=model)
+        _save_audio_result(result, output)
+    except (AudioUnderstandingError, OSError) as error:
         console.print(f"[red]错误: {error}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]完成![/green] 已保存 MP4: {output_path}")
 
-
-# ── music 子命令 ───────────────────────────────────────────────
-
-@app.command("music")
-def music_cmd(
-    url: str = typer.Argument(..., help="网易云音乐链接（单曲/专辑/歌单/歌手）"),
-    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认从 .env MUSIC_FOLDER 读取，或 ./output）"),
-    bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps)"),
-    no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 ID3 元数据写入"),
-    cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
-    playlist: bool = typer.Option(False, "--playlist", help="下载全部曲目（专辑/歌单/歌手链接默认已启用）"),
+@music_app.command("beats")
+def music_beats(
+    audio: str = typer.Argument(..., help="输入音频路径"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="将分析结果保存到文本文件"),
+    beat_strength_threshold: float = typer.Option(0.2, "--beat-strength-threshold", "--beat-threshold", help="保留的相对强度阈值（0~1，默认 0.2）"),
+    beat_min_interval: float = typer.Option(1.0, "--beat-min-interval", help="时间窗口（秒，默认每秒最多 1 个）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
 ):
-    """网易云音乐下载 → 转为 MP3（带 ID3 元数据）
-
-    下载网易云音乐音频，转为 MP3 格式，自动写入标题、歌手、专辑、封面等 ID3 标签。
-
-    支持链接类型：
-
-        opc music "https://music.163.com/song?id=xxx"       # 单曲
-        opc music "https://music.163.com/album?id=xxx"      # 专辑
-        opc music "https://music.163.com/playlist?id=xxx"   # 歌单
-        opc music "https://music.163.com/artist?id=xxx"     # 歌手
+    """鼓点检测：使用 librosa 输出筛选后的 BPM、节拍和起音时刻。
 
     示例:
 
-        opc music "https://music.163.com/song?id=2143914149"
-
-        opc music "URL" -o ./music --bitrate 320
-
-        opc music "URL" --no-metadata
+        opc music beats song.m4a
+        opc music beats song.m4a --beat-strength-threshold 0.35 --beat-min-interval 1.0
     """
-    load_env()
+    load_env(env_file)
+    audio_path = Path(audio)
+    console.print("[bold]=== Librosa 鼓点检测 ===[/bold]")
+    console.print(f"输入: {audio_path}")
 
-    if output_dir is None:
-        output_dir = get_music_folder() or "./output"
+    try:
+        beat_analysis = detect_beats(str(audio_path))
+        beat_analysis["filtered"] = filter_beat_events(
+            beat_analysis,
+            strength_threshold=beat_strength_threshold,
+            min_interval=beat_min_interval,
+        )
+        result = format_librosa_analysis(beat_analysis)
+        _save_audio_result(result, output)
+    except (AudioUnderstandingError, OSError) as error:
+        console.print(f"[red]错误: {error}[/red]")
+        raise typer.Exit(1)
 
-    run_music(
-        url=url,
-        output_dir=output_dir,
-        bitrate=bitrate,
-        no_metadata=no_metadata,
-        cookies=cookies,
-        playlist=playlist,
-    )
 
-
-# ── music-gen 子命令 ────────────────────────────────────────────
-
-@app.command("music-gen")
-def music_gen_cmd(
+@music_app.command("generate")
+def music_generate(
     prompt: Optional[str] = typer.Argument(None, help="音乐风格、场景和情绪描述"),
     lyrics: Optional[str] = typer.Option(None, "--lyrics", help="自定义歌词，与 prompt 至少提供一个"),
     lyrics_file: Optional[str] = typer.Option(None, "--lyrics-file", help="从 UTF-8 文本文件读取自定义歌词"),
@@ -255,7 +255,14 @@ def music_gen_cmd(
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出音频路径（默认 output/music_gen_<时间戳>.<格式>）"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
 ):
-    """使用阿里云 Fun-Music 或 MiniMax Music 生成歌曲/纯音乐。"""
+    """音乐生成：使用阿里云 Fun-Music 或 MiniMax Music 生成歌曲/纯音乐。
+
+    示例:
+
+        opc music generate "夏日清新民谣，木吉他与口琴伴奏，适合旅行 Vlog"
+        opc music generate "宁静的钢琴曲" --instrumental
+        opc music generate --provider minimax "梦幻电子流行" -o song.mp3
+    """
     load_env(env_file)
     selected_provider = (provider or os.environ.get("MUSIC_GEN_PROVIDER", "aliyun")).strip().lower()
 
@@ -304,155 +311,436 @@ def music_gen_cmd(
         console.print("已返回模型生成/使用的歌词，可在 API 响应中获取。")
 
 
-# ── asr 子命令 ────────────────────────────────────────────────────
+# ── image 模态 ─────────────────────────────────────────────────
 
-@app.command()
-def asr(
-    audio: str = typer.Argument(..., help="输入音频文件路径（.wav/.mp3/.m4a 等）"),
-    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认与输入文件同目录）"),
-    no_resegment: bool = typer.Option(False, "--no-resegment", help="禁用自动重断句（保留 ASR 原始切分）"),
-    llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
-    trim: Optional[int] = typer.Option(None, "-t", "--trim", help="只识别音频的前 N 秒（方便测试）"),
+@image_app.command("understand")
+def image_understand(
+    image: str = typer.Argument(help="图片路径或 URL"),
+    prompt: str = typer.Option("请详细描述这张图片的内容", "-p", "--prompt", help="提问内容"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出到文件（默认打印到终端）"),
+    model: str = typer.Option("", "--model", help="视觉模型名称（默认从 .env 读取 VISION_MODEL）"),
+    max_tokens: int = typer.Option(4096, "--max-tokens", help="最大输出 token 数"),
+    temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
-    """语音识别（ASR）：将音频文件转写为 SRT 和 JSON 字幕文件
-
-    使用阿里云 DashScope fun-asr-realtime 模型，支持精确时间戳。
+    """图片理解：使用视觉模型分析图片内容。
 
     示例:
 
-        opc asr audio.wav
-
-        opc asr recording.mp3 -o ./output
+        opc image understand photo.jpg
+        opc image understand ui.png -p "每个控件的相对位置和像素大小是什么"
     """
-    load_env()
+    load_env(env_file)
 
-    audio_path = Path(audio)
-    if not audio_path.exists():
-        console.print(f"[red]错误: 文件不存在: {audio}[/red]")
-        raise typer.Exit(1)
+    result = understand_image(
+        image=image,
+        prompt=prompt,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
 
-    if audio_path.suffix.lower() not in (".wav", ".mp3", ".m4a", ".mp4", ".webm", ".ogg", ".opus", ".mov", ".mkv"):
-        console.print(f"[red]错误: 不支持的音频格式: {audio_path.suffix}（支持 .wav/.mp3/.m4a/.webm/.ogg/.opus）[/red]")
-        raise typer.Exit(1)
-
-    # 输出目录：默认与输入文件同目录
-    if output_dir:
-        out_dir = Path(output_dir)
+    if output:
+        output_dir = str(Path(output).parent)
+        if output_dir:
+            import os
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(result)
+        console.print(f"\n结果已保存: {output}")
     else:
-        out_dir = audio_path.parent
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    audio_base = audio_path.stem
-    srt_path = out_dir / f"{audio_base}.srt"
-    json_path = out_dir / f"{audio_base}.asr.json"
-
-    console.print(f"[bold]=== ASR 语音识别 ===[/bold]")
-    console.print(f"输入: {audio_path}")
-    console.print(f"输出: {out_dir}")
-
-    # ASR 转写（asr_transcribe 内部会自动转换格式）
-    asr_result = asr_transcribe(str(audio_path), trim_seconds=trim)
-
-    # 保存原始 ASR 结果（JSON），不经过重断句处理
-    with open(str(json_path), "w", encoding="utf-8") as f:
-        import json
-        json.dump(asr_result, f, ensure_ascii=False, indent=2)
-    console.print(f"ASR JSON 已保存（原始结果）: {json_path}")
-
-    # 自动重断句：按自然语句重新切分
-    if not no_resegment:
-        console.print("[dim]  自动重断句（按逗号逐句切分）...[/dim]")
-        asr_result = resegment_asr(asr_result, llm_fix=llm_fix)
-
-    # 生成 SRT
-    generate_srt(asr_result, str(srt_path))
-
-    console.print(f"\n[green]完成![/green]")
-    console.print(f"  SRT:  {srt_path}")
-    console.print(f"  JSON: {json_path}")
+        console.print("\n" + "=" * 50)
+        console.print(result)
+        console.print("=" * 50)
 
 
-# ── audio 命令组 ──────────────────────────────────────────────────
+@image_app.command("generate")
+def image_generate(
+    prompt: str = typer.Argument(help="提示词（文生图）或编辑指令（--image 时）"),
+    engine: str = typer.Option("qwen", "--engine", help="生成引擎: qwen（阿里云 Qwen Image）/ gpt-image（OpenAI GPT-Image）"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/image_<时间戳>.png）"),
+    size: str = typer.Option("2:3", "-s", "--size", help=f"宽高比（如 2:3, 16:9）或像素（如 1024*1536）: {', '.join(_GPT_SIZES)} 等"),
+    model: str = typer.Option("", "--model", help="模型名称（qwen 引擎，默认读取 .env IMAGE_MODEL，默认为 qwen-image-3.0）"),
+    image: Optional[list[str]] = typer.Option(None, "-i", "--image", help="编辑输入图片路径、URL 或 data URI（qwen 引擎，可重复指定，最多 3 张）"),
+    negative_prompt: Optional[str] = typer.Option(None, "--negative-prompt", help="负向提示词（qwen 引擎）"),
+    n: int = typer.Option(1, "--n", help="生成张数（qwen: 1~6；gpt-image: 1~4）"),
+    prompt_extend: bool = typer.Option(True, "--prompt-extend/--no-prompt-extend", help="启用 Qwen Image 智能提示词改写（qwen 引擎，默认开启）"),
+    seed: Optional[int] = typer.Option(None, "--seed", help="随机种子 0~2147483647（qwen 引擎）"),
+    watermark: bool = typer.Option(False, "--watermark/--no-watermark", help="是否添加水印（qwen 引擎）"),
+    resolution: str = typer.Option("1k", "-r", "--resolution", help="分辨率档位: 1k / 2k / 4k（gpt-image 引擎）"),
+    quality: str = typer.Option("auto", "--quality", help="图片质量: auto / low / medium / high（gpt-image 引擎）"),
+    enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 LLM 丰富提示词（gpt-image 引擎，默认开启）"),
+    ref: Optional[list[str]] = typer.Option(None, "--ref", help="参考图路径或 URL（gpt-image 引擎，可多次指定，最多16张）"),
+    output_format: str = typer.Option("png", "--output-format", help="输出格式: png / jpeg / webp（gpt-image 引擎）"),
+    output_compression: Optional[int] = typer.Option(None, "--output-compression", help="压缩强度 0-100（gpt-image 引擎，仅 jpeg/webp）"),
+    moderation: str = typer.Option("auto", "--moderation", help="审核强度: auto / low（gpt-image 引擎）"),
+    use_proxy: bool = typer.Option(False, "--proxy/--no-proxy", help="强制使用/禁用代理（gpt-image 引擎；WSL 下默认自动启用，无需此参数）"),
+    timeout: int = typer.Option(600, "--timeout", help="最大等待时间（秒，gpt-image 引擎）"),
+    no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
+):
+    """文生图 / 图生图 / 图像编辑：Qwen Image（默认）或 GPT-Image
 
-def _save_audio_result(result: str, output: Optional[str]) -> None:
-    """输出音乐分析结果，可选保存到文本文件。"""
+    qwen 引擎（默认）:
+
+        opc image generate "一只穿着宇航服的猫"
+        opc image generate "把天空改成绚丽的晚霞" --image ./input/landscape.png
+        opc image generate "人像" -s 3:4 --seed 42
+
+    gpt-image 引擎（原 gpt-img）:
+
+        opc image generate "海报" --engine gpt-image -s 16:9 -r 2k
+        opc image generate "换成赛博朋克风格" --engine gpt-image --ref original.png
+        opc image generate "a cute cat" --engine gpt-image --no-enhance
+    """
+    load_env(env_file)
+    engine = (engine or "qwen").strip().lower()
+    if engine not in ("qwen", "gpt-image"):
+        console.print(f"[red]错误: 不支持的引擎 '{engine}'，可选: qwen / gpt-image[/red]")
+        raise typer.Exit(1)
+
+    if engine == "gpt-image":
+        qwen_only = [
+            name
+            for name, value in (
+                ("--image", image),
+                ("--negative-prompt", negative_prompt),
+                ("--seed", seed),
+                ("--watermark", watermark),
+                ("--model", model),
+            )
+            if value
+        ]
+        if qwen_only:
+            console.print(f"[yellow]提示: 参数 {', '.join(qwen_only)} 仅 qwen 引擎生效，已忽略[/yellow]")
+        return _run_gpt_image(
+            prompt=prompt,
+            output=output,
+            size=size,
+            n=n,
+            no_download=no_download,
+            resolution=resolution,
+            quality=quality,
+            enhance=enhance,
+            ref=ref,
+            output_format=output_format,
+            output_compression=output_compression,
+            moderation=moderation,
+            use_proxy=use_proxy,
+            timeout=timeout,
+            env_file=env_file,
+        )
+
+    gpt_only = [
+        name
+        for name, value in (
+            ("--ref", ref),
+            ("--output-compression", output_compression),
+            ("--resolution", resolution if resolution != "1k" else None),
+            ("--quality", quality if quality != "auto" else None),
+            ("--moderation", moderation if moderation != "auto" else None),
+            ("--timeout", timeout if timeout != 600 else None),
+        )
+        if value
+    ]
+    if gpt_only:
+        console.print(f"[yellow]提示: 参数 {', '.join(gpt_only)} 仅 gpt-image 引擎生效，已忽略[/yellow]")
+    return _run_qwen_image(
+        prompt=prompt,
+        output=output,
+        size=size,
+        model=model,
+        image=image,
+        negative_prompt=negative_prompt,
+        n=n,
+        prompt_extend=prompt_extend,
+        seed=seed,
+        watermark=watermark,
+        no_download=no_download,
+        env_file=env_file,
+    )
+
+
+def _run_qwen_image(
+    prompt: str,
+    output: Optional[str],
+    size: str,
+    model: str,
+    image: Optional[list[str]],
+    negative_prompt: Optional[str],
+    n: int,
+    prompt_extend: bool,
+    seed: Optional[int],
+    watermark: bool,
+    no_download: bool,
+    env_file: Optional[str],
+):
+    """Qwen Image 3.0 文生图 / 图像编辑（image generate 的 qwen 引擎）。"""
+    api_key, cfg_model = get_image_config()
+    use_model = model or cfg_model
+    editing = bool(image)
+
+    console.print(f"[bold]=== {'图像编辑' if editing else '文生图'} (Qwen Image 3.0) ===[/bold]")
+    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+    console.print(f"分辨率: {size} | 模型: {use_model}")
+    if image:
+        console.print(f"参考图: {len(image)} 张")
+
+    import time
+    t0 = time.time()
+    try:
+        result = generate_image(
+            prompt=prompt,
+            api_key=api_key,
+            size=size,
+            model=use_model,
+            prompt_extend=prompt_extend,
+            seed=seed,
+            images=image,
+            negative_prompt=negative_prompt,
+            n=n,
+            watermark=watermark,
+        )
+    except ValueError as e:
+        console.print(f"[red]参数错误: {e}[/red]")
+        raise typer.Exit(1)
+    except RuntimeError as e:
+        console.print(f"[red]生成失败: {e}[/red]")
+        raise typer.Exit(1)
+
+    elapsed = time.time() - t0
+    image_urls = result.get("image_urls") or []
+    if not image_urls and result.get("image_url"):
+        image_urls = [result["image_url"]]
+    if not image_urls:
+        console.print("[red]未获取到图片 URL[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s) {result.get('width')}*{result.get('height')}，共 {len(image_urls)} 张")
+    if result.get("text") and prompt_extend:
+        console.print(f"[dim]改写后提示词: {result['text'][:200]}[/dim]")
+
+    if no_download:
+        for index, image_url in enumerate(image_urls, 1):
+            console.print(f"\n图片 URL {index}: {image_url}")
+        console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
+        return
+
+    if not output:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        output = f"output/image_{ts}.png"
+
+    try:
+        for index, image_url in enumerate(image_urls, 1):
+            save_path = output
+            if len(image_urls) > 1:
+                output_path = Path(output)
+                save_path = str(output_path.with_name(f"{output_path.stem}_{index}{output_path.suffix or '.png'}"))
+            saved = download_image(image_url, save_path)
+            file_size = Path(saved).stat().st_size
+            console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
+            console.print(f"[dim]URL {index}: {image_url}[/dim]")
+    except Exception as e:
+        console.print(f"[red]下载失败: {e}[/red]")
+        raise typer.Exit(1)
+
+
+def _run_gpt_image(
+    prompt: str,
+    output: Optional[str],
+    size: str,
+    n: int,
+    no_download: bool,
+    resolution: str,
+    quality: str,
+    enhance: bool,
+    ref: Optional[list[str]],
+    output_format: str,
+    output_compression: Optional[int],
+    moderation: str,
+    use_proxy: bool,
+    timeout: int,
+    env_file: Optional[str],
+):
+    """GPT-Image-2-Official 文生图（image generate 的 gpt-image 引擎，异步轮询）。"""
+    api_key, base_url, cfg_model = get_gpt_image_config()
+
+    # 构建 gpt-image 专用代理（WSL 下自动启用，直连不通）
+    proxies = None
+    if use_proxy or _is_wsl():
+        proxy_url = get_gpt_img_proxy()
+        proxies = _gpt_build_proxies(proxy_url)
+        if proxies:
+            console.print(f"[dim]代理: {proxy_url}[/dim]")
+
+    console.print(f"[bold]=== GPT-Image-2-Official 文生图 ===[/bold]")
+    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+    console.print(f"宽高比: {size} | 分辨率: {resolution} | 质量: {quality} | 张数: {n} | 模型: {cfg_model}")
+
+    # 使用 LLM 丰富提示词
+    use_prompt = prompt
+    use_prompt_json = None
+    if enhance:
+        console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
+        try:
+            llm_key, llm_url, llm_model = get_llm_config()
+            enhanced = _gpt_enhance_prompt(
+                prompt=prompt,
+                llm_api_key=llm_key,
+                llm_base_url=llm_url,
+                llm_model=llm_model,
+                aspect_ratio=size,
+            )
+            use_prompt = enhanced["flat"]
+            use_prompt_json = enhanced["json_str"]
+            console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
+            if use_prompt_json:
+                console.print(f"[cyan]  丰富(JSON): {use_prompt_json[:300]}{'...' if len(use_prompt_json) > 300 else ''}[/cyan]")
+            else:
+                console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
+        except Exception as e:
+            console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
+
+    # 处理参考图
+    image_urls = None
+    if ref:
+        image_urls = []
+        for r in ref:
+            if r.startswith("http://") or r.startswith("https://"):
+                image_urls.append(r)
+            elif r.startswith("data:"):
+                image_urls.append(r)
+            else:
+                try:
+                    data_uri = _gpt_load_base64(r)
+                    image_urls.append(data_uri)
+                    console.print(f"[dim]  参考图: {r} → base64[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠ 参考图加载失败 {r}: {e}[/yellow]")
+        console.print(f"参考图: {len(image_urls)} 张")
+
+    # 提交任务 + 轮询
+    import time as _time
+    t0 = _time.time()
+
+    def on_status(status, task_id):
+        console.print(f"[dim]  任务 {task_id} → {status}[/dim]")
+
+    try:
+        result = _gpt_submit_and_wait(
+            prompt=use_prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=cfg_model,
+            size=size,
+            resolution=resolution,
+            quality=quality,
+            image_urls=image_urls,
+            n=n,
+            output_format=output_format,
+            output_compression=output_compression,
+            moderation=moderation,
+            timeout=timeout,
+            on_status=on_status,
+            proxies=proxies,
+            prompt_json=use_prompt_json,
+        )
+    except ValueError as e:
+        console.print(f"[red]参数错误: {e}[/red]")
+        raise typer.Exit(1)
+    except RuntimeError as e:
+        console.print(f"[red]生成失败: {e}[/red]")
+        raise typer.Exit(1)
+
+    elapsed = _time.time() - t0
+    image_url = result.get("image_url")
+
+    if not image_url:
+        console.print("[red]未获取到图片 URL[/red]")
+        raise typer.Exit(1)
+
+    cost = result.get("cost", 0)
+    actual_time = result.get("actual_time", "?")
+    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s, 实际生成: {actual_time}s, 费用: ${cost:.5f})")
+
+    # 输出
+    if no_download:
+        console.print(f"\n图片 URL: {image_url}")
+        console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
+    else:
+        if not output:
+            ts = _time.strftime("%Y%m%d_%H%M%S")
+            output = f"output/gpt_img_{ts}.{output_format}"
+
+        try:
+            saved = _gpt_download_image(image_url, output, proxies=proxies)
+            file_size = Path(saved).stat().st_size
+            console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
+        except Exception as e:
+            console.print(f"[red]下载失败: {e}[/red]")
+            console.print(f"图片 URL（有效期 24 小时）: {image_url}")
+            raise typer.Exit(1)
+
+    console.print(f"[dim]URL: {image_url}[/dim]")
+
+
+# ── video 模态 ─────────────────────────────────────────────────
+
+@video_app.command("understand")
+def video_understand(
+    video: str = typer.Argument(..., help="本地视频路径或可直接访问的视频 URL"),
+    prompt: str = typer.Option(
+        "请详细分析这个视频的内容、镜头运动、构图、主体动作和时间线。",
+        "-p",
+        "--prompt",
+        help="提问内容",
+    ),
+    output: Optional[str] = typer.Option(
+        None, "-o", "--output", help="输出到文件（默认打印到终端）"
+    ),
+    model: str = typer.Option(
+        "", "--model", help="Qwen3-VL 模型名称（默认从 .env VIDEO_MODEL 读取）"
+    ),
+    max_tokens: int = typer.Option(4096, "--max-tokens", help="最大输出 token 数"),
+    temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """视频理解：使用 Qwen3-VL 分析视频内容和镜头运动。
+
+    示例:
+
+        opc video understand ./input/video.mp4
+        opc video understand ./input/video.mp4 -p "按时间段分析镜头运动、景别和主体动作" -o ./output/video-analysis.txt
+    """
+    load_env(env_file)
+
+    try:
+        result = understand_video(
+            video=video,
+            prompt=prompt,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    except (VideoUnderstandingError, OSError) as error:
+        console.print(f"[red]错误: {error}[/red]")
+        raise typer.Exit(1)
+
     if output:
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(result + "\n", encoding="utf-8")
-        console.print(f"结果已保存: {output_path}")
-    console.print("\n" + result)
+        console.print(f"\n结果已保存: {output_path}")
+    else:
+        console.print("\n" + "=" * 50)
+        console.print(result)
+        console.print("=" * 50)
 
 
-@app.command("audio")
-def audio_cmd(
-    audio: str = typer.Argument(..., help="输入音频路径，或使用 librosa 模式"),
-    audio_file: Optional[str] = typer.Argument(None, help="librosa 模式下的输入音频文件路径"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="将分析结果保存到文本文件"),
-    model: str = typer.Option("", "--model", help="音乐理解模型（默认读取 .env AUDIO_MODEL，默认为 qwen3-omni-30b-a3b-captioner）"),
-    beat_strength_threshold: float = typer.Option(0.2, "--beat-strength-threshold", "--beat-threshold", help="librosa 模式保留的相对强度阈值（0~1，默认 0.2）"),
-    beat_min_interval: float = typer.Option(1.0, "--beat-min-interval", help="librosa 模式的时间窗口（秒，默认每秒最多 1 个）"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
-):
-    """音乐理解，或使用 `opc audio librosa <音频>` 检测鼓点。"""
-    load_env(env_file)
+# ── speech 模态 ────────────────────────────────────────────────
 
-    if audio == "librosa":
-        if not audio_file:
-            console.print("[red]错误: librosa 模式需要提供音频文件路径[/red]")
-            raise typer.Exit(1)
-        return _run_librosa_audio(
-            audio_file,
-            output=output,
-            beat_strength_threshold=beat_strength_threshold,
-            beat_min_interval=beat_min_interval,
-        )
-
-    if audio_file:
-        console.print("[red]错误: 只有 `opc audio librosa <音频>` 支持两个位置参数[/red]")
-        raise typer.Exit(1)
-
-    audio_path = Path(audio)
-    console.print("[bold]=== 音乐理解 ===[/bold]")
-    console.print(f"输入: {audio_path}")
-
-    try:
-        result = analyze_audio(str(audio_path), model=model)
-        _save_audio_result(result, output)
-    except (AudioUnderstandingError, OSError) as error:
-        console.print(f"[red]错误: {error}[/red]")
-        raise typer.Exit(1)
-
-
-def _run_librosa_audio(
-    audio: str,
-    output: Optional[str],
-    beat_strength_threshold: float,
-    beat_min_interval: float,
-):
-    """运行 librosa 鼓点检测并输出筛选结果。"""
-    audio_path = Path(audio)
-    console.print("[bold]=== Librosa 鼓点检测 ===[/bold]")
-    console.print(f"输入: {audio_path}")
-
-    try:
-        beat_analysis = detect_beats(str(audio_path))
-        beat_analysis["filtered"] = filter_beat_events(
-            beat_analysis,
-            strength_threshold=beat_strength_threshold,
-            min_interval=beat_min_interval,
-        )
-        result = format_librosa_analysis(beat_analysis)
-        _save_audio_result(result, output)
-    except (AudioUnderstandingError, OSError) as error:
-        console.print(f"[red]错误: {error}[/red]")
-        raise typer.Exit(1)
-
-
-# ── tts 子命令 ────────────────────────────────────────────────────
-
-@app.command()
-def tts(
+@speech_app.command("tts")
+def speech_tts(
     text: str = typer.Argument("", help="要转换为语音的文本（--list-voices 时可省略）"),
     output: str = typer.Option("output.wav", "-o", "--output", help="输出音频文件路径"),
     voice: str = typer.Option("tongtong", "--voice", help="音色名称或克隆音色 ID"),
@@ -466,7 +754,7 @@ def tts(
     voice_name: Optional[str] = typer.Option(None, "--voice-name", help="克隆音色名称"),
     list_voices: bool = typer.Option(False, "--list-voices", help="列出系统音色"),
     list_cloned: bool = typer.Option(False, "--list-cloned", help="列出已克隆的音色"),
-    engine: str = typer.Option("qwen-tts", "--engine", help="TTS 引擎: glm-tts (智谱) / qwen-tts (阿里云 CosyVoice)"),
+    engine: str = typer.Option("qwen-tts", "--engine", help="TTS 引擎: qwen-tts (阿里云 CosyVoice) / glm-tts (智谱)"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
 ):
     """文字转语音（默认 CosyVoice v3-flash + 龙呼呼音色）
@@ -475,8 +763,19 @@ def tts(
     音色为龙呼呼（天真烂漫女童）。可通过 --engine glm-tts 切换回智谱引擎。
 
     使用 --list-voices 查看系统音色，--list-cloned 查看克隆音色。
+    本地 Qwen3-TTS 请使用独立的一级命令 `opc local-tts`。
+
+    示例:
+
+        opc speech tts "你好世界" -o output.wav
+        opc speech tts "新闻播报" --voice longshuo_v3
+        opc speech tts "我是克隆的声音" --clone --ref-audio ref.wav
     """
     load_env(env_file)
+    if engine not in ("qwen-tts", "glm-tts"):
+        console.print(f"[red]错误: 不支持的 TTS 引擎 '{engine}'，可选: qwen-tts / glm-tts[/red]")
+        raise typer.Exit(1)
+
     # Qwen TTS 直接使用 ALIYUN_API_KEY；智谱凭证只在 GLM-TTS、音色列表
     # 或音色克隆等智谱功能需要时读取。
     api_key = base_url = ""
@@ -559,6 +858,72 @@ def tts(
         watermark=watermark,
         engine=engine,
     )
+
+
+@speech_app.command("asr")
+def speech_asr(
+    audio: str = typer.Argument(..., help="输入音频文件路径（.wav/.mp3/.m4a 等）"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认与输入文件同目录）"),
+    no_resegment: bool = typer.Option(False, "--no-resegment", help="禁用自动重断句（保留 ASR 原始切分）"),
+    llm_fix: bool = typer.Option(False, "--llm-fix", help="使用 LLM 修复 ASR 断词和标点错误"),
+    trim: Optional[int] = typer.Option(None, "-t", "--trim", help="只识别音频的前 N 秒（方便测试）"),
+):
+    """语音识别（ASR）：将音频文件转写为 SRT 和 JSON 字幕文件
+
+    使用阿里云 DashScope fun-asr-realtime 模型，支持精确时间戳。
+
+    示例:
+
+        opc speech asr audio.wav
+        opc speech asr recording.mp3 -o ./output
+        opc speech asr audio.wav --llm-fix
+    """
+    load_env()
+
+    audio_path = Path(audio)
+    if not audio_path.exists():
+        console.print(f"[red]错误: 文件不存在: {audio}[/red]")
+        raise typer.Exit(1)
+
+    if audio_path.suffix.lower() not in (".wav", ".mp3", ".m4a", ".mp4", ".webm", ".ogg", ".opus", ".mov", ".mkv"):
+        console.print(f"[red]错误: 不支持的音频格式: {audio_path.suffix}（支持 .wav/.mp3/.m4a/.webm/.ogg/.opus）[/red]")
+        raise typer.Exit(1)
+
+    # 输出目录：默认与输入文件同目录
+    if output_dir:
+        out_dir = Path(output_dir)
+    else:
+        out_dir = audio_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_base = audio_path.stem
+    srt_path = out_dir / f"{audio_base}.srt"
+    json_path = out_dir / f"{audio_base}.asr.json"
+
+    console.print(f"[bold]=== ASR 语音识别 ===[/bold]")
+    console.print(f"输入: {audio_path}")
+    console.print(f"输出: {out_dir}")
+
+    # ASR 转写（asr_transcribe 内部会自动转换格式）
+    asr_result = asr_transcribe(str(audio_path), trim_seconds=trim)
+
+    # 保存原始 ASR 结果（JSON），不经过重断句处理
+    with open(str(json_path), "w", encoding="utf-8") as f:
+        import json
+        json.dump(asr_result, f, ensure_ascii=False, indent=2)
+    console.print(f"ASR JSON 已保存（原始结果）: {json_path}")
+
+    # 自动重断句：按自然语句重新切分
+    if not no_resegment:
+        console.print("[dim]  自动重断句（按逗号逐句切分）...[/dim]")
+        asr_result = resegment_asr(asr_result, llm_fix=llm_fix)
+
+    # 生成 SRT
+    generate_srt(asr_result, str(srt_path))
+
+    console.print(f"\n[green]完成![/green]")
+    console.print(f"  SRT:  {srt_path}")
+    console.print(f"  JSON: {json_path}")
 
 
 # ── 音频播放 ──────────────────────────────────────────────────────
@@ -992,335 +1357,6 @@ def local_tts(
     # 生成后播放
     if play and os.path.exists(output):
         _play_audio(output)
-
-
-# ── img 子命令 ────────────────────────────────────────────────────
-
-@app.command("read-img")
-def img(
-    image: str = typer.Argument(help="图片路径或 URL"),
-    prompt: str = typer.Option("请详细描述这张图片的内容", "-p", "--prompt", help="提问内容"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出到文件（默认打印到终端）"),
-    model: str = typer.Option("", "--model", help="视觉模型名称（默认从 .env 读取 VISION_MODEL）"),
-    max_tokens: int = typer.Option(4096, "--max-tokens", help="最大输出 token 数"),
-    temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-):
-    """图片理解：使用视觉模型分析图片内容"""
-    load_env(env_file)
-
-    result = understand_image(
-        image=image,
-        prompt=prompt,
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
-
-    if output:
-        output_dir = str(Path(output).parent)
-        if output_dir:
-            import os
-            os.makedirs(output_dir, exist_ok=True)
-        with open(output, "w", encoding="utf-8") as f:
-            f.write(result)
-        console.print(f"\n结果已保存: {output}")
-    else:
-        console.print("\n" + "=" * 50)
-        console.print(result)
-        console.print("=" * 50)
-
-
-@app.command("video")
-def video_cmd(
-    video: str = typer.Argument(..., help="本地视频路径或可直接访问的视频 URL"),
-    prompt: str = typer.Option(
-        "请详细分析这个视频的内容、镜头运动、构图、主体动作和时间线。",
-        "-p",
-        "--prompt",
-        help="提问内容",
-    ),
-    output: Optional[str] = typer.Option(
-        None, "-o", "--output", help="输出到文件（默认打印到终端）"
-    ),
-    model: str = typer.Option(
-        "", "--model", help="Qwen3-VL 模型名称（默认从 .env VIDEO_MODEL 读取）"
-    ),
-    max_tokens: int = typer.Option(4096, "--max-tokens", help="最大输出 token 数"),
-    temperature: float = typer.Option(0.7, "--temperature", help="生成温度 0-1"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
-):
-    """视频理解：使用 Qwen3-VL 分析视频内容和镜头运动。"""
-    load_env(env_file)
-
-    try:
-        result = understand_video(
-            video=video,
-            prompt=prompt,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    except (VideoUnderstandingError, OSError) as error:
-        console.print(f"[red]错误: {error}[/red]")
-        raise typer.Exit(1)
-
-    if output:
-        output_path = Path(output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(result + "\n", encoding="utf-8")
-        console.print(f"\n结果已保存: {output_path}")
-    else:
-        console.print("\n" + "=" * 50)
-        console.print(result)
-        console.print("=" * 50)
-
-
-# ── gpt-img 子命令 ──────────────────────────────────────────────
-
-@app.command("gpt-img")
-def gpt_img(
-    prompt: str = typer.Argument(help="提示词（中英文，描述期望生成的图像）"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/gpt_img_<时间戳>.png）"),
-    size: str = typer.Option("2:3", "-s", "--size", help=f"宽高比: {', '.join(_GPT_SIZES)}，或像素如 1024*1536"),
-    resolution: str = typer.Option("1k", "-r", "--resolution", help="分辨率档位: 1k / 2k / 4k（全比例均支持 4K）"),
-    quality: str = typer.Option("auto", "--quality", help="图片质量: auto / low / medium / high"),
-    enhance: bool = typer.Option(True, "--enhance/--no-enhance", help="使用 LLM 丰富提示词（默认开启）"),
-    ref: Optional[list[str]] = typer.Option(None, "--ref", help="参考图路径或 URL（可多次指定，最多16张）"),
-    n: int = typer.Option(1, "--n", help="生成张数 1 ~ 4"),
-    output_format: str = typer.Option("png", "--output-format", help="输出格式: png / jpeg / webp"),
-    output_compression: Optional[int] = typer.Option(None, "--output-compression", help="压缩强度 0-100（仅 jpeg/webp）"),
-    moderation: str = typer.Option("auto", "--moderation", help="审核强度: auto / low"),
-    no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
-    use_proxy: bool = typer.Option(False, "--proxy/--no-proxy", help="强制使用/禁用代理（WSL 下默认自动启用，无需此参数）"),
-    timeout: int = typer.Option(600, "--timeout", help="最大等待时间（秒）"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-):
-    """GPT-Image-2-Official 文生图：OpenAI 官方模型（异步，自动轮询等待结果）
-
-    默认使用 LLM (LLM_MODEL) 丰富提示词，可用 --no-enhance 关闭。
-    WSL 下代理默认自动启用（无需 --proxy），Windows 下需手动 --proxy。
-
-    宽高比: 1:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 2:1, 1:2, 3:1, 1:3, 21:9, 9:21, auto
-
-    分辨率: 1k(默认) / 2k / 4k（全比例均支持 4K，不再有限制）
-
-    图生图: 使用 --ref 指定参考图（本地路径或 URL）
-
-    批量生成: --n 4 一次生成 4 张
-    """
-    load_env(env_file)
-    api_key, base_url, cfg_model = get_gpt_image_config()
-
-    # 构建 gpt-img 专用代理（WSL 下自动启用，直连不通）
-    proxies = None
-    if use_proxy or _is_wsl():
-        proxy_url = get_gpt_img_proxy()
-        proxies = _gpt_build_proxies(proxy_url)
-        if proxies:
-            console.print(f"[dim]代理: {proxy_url}[/dim]")
-
-    console.print(f"[bold]=== GPT-Image-2-Official 文生图 ===[/bold]")
-    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-    console.print(f"宽高比: {size} | 分辨率: {resolution} | 质量: {quality} | 张数: {n} | 模型: {cfg_model}")
-
-    # 使用 LLM 丰富提示词
-    use_prompt = prompt
-    use_prompt_json = None
-    if enhance:
-        console.print("\n[cyan]🧠 使用 LLM 丰富提示词...[/cyan]")
-        try:
-            llm_key, llm_url, llm_model = get_llm_config()
-            enhanced = _gpt_enhance_prompt(
-                prompt=prompt,
-                llm_api_key=llm_key,
-                llm_base_url=llm_url,
-                llm_model=llm_model,
-                aspect_ratio=size,
-            )
-            use_prompt = enhanced["flat"]
-            use_prompt_json = enhanced["json_str"]
-            console.print(f"[dim]  原始: {prompt[:80]}[/dim]")
-            if use_prompt_json:
-                console.print(f"[cyan]  丰富(JSON): {use_prompt_json[:300]}{'...' if len(use_prompt_json) > 300 else ''}[/cyan]")
-            else:
-                console.print(f"[cyan]  丰富: {use_prompt[:150]}{'...' if len(use_prompt) > 150 else ''}[/cyan]")
-        except Exception as e:
-            console.print(f"[yellow]⚠ LLM 丰富失败，使用原始提示词: {e}[/yellow]")
-
-    # 处理参考图
-    image_urls = None
-    if ref:
-        image_urls = []
-        for r in ref:
-            if r.startswith("http://") or r.startswith("https://"):
-                image_urls.append(r)
-            elif r.startswith("data:"):
-                image_urls.append(r)
-            else:
-                try:
-                    data_uri = _gpt_load_base64(r)
-                    image_urls.append(data_uri)
-                    console.print(f"[dim]  参考图: {r} → base64[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]⚠ 参考图加载失败 {r}: {e}[/yellow]")
-        console.print(f"参考图: {len(image_urls)} 张")
-
-    # 提交任务 + 轮询
-    import time as _time
-    t0 = _time.time()
-
-    def on_status(status, task_id):
-        console.print(f"[dim]  任务 {task_id} → {status}[/dim]")
-
-    try:
-        result = _gpt_submit_and_wait(
-            prompt=use_prompt,
-            api_key=api_key,
-            base_url=base_url,
-            model=cfg_model,
-            size=size,
-            resolution=resolution,
-            quality=quality,
-            image_urls=image_urls,
-            n=n,
-            output_format=output_format,
-            output_compression=output_compression,
-            moderation=moderation,
-            timeout=timeout,
-            on_status=on_status,
-            proxies=proxies,
-            prompt_json=use_prompt_json,
-        )
-    except ValueError as e:
-        console.print(f"[red]参数错误: {e}[/red]")
-        raise typer.Exit(1)
-    except RuntimeError as e:
-        console.print(f"[red]生成失败: {e}[/red]")
-        raise typer.Exit(1)
-
-    elapsed = _time.time() - t0
-    image_url = result.get("image_url")
-
-    if not image_url:
-        console.print("[red]未获取到图片 URL[/red]")
-        raise typer.Exit(1)
-
-    cost = result.get("cost", 0)
-    actual_time = result.get("actual_time", "?")
-    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s, 实际生成: {actual_time}s, 费用: ${cost:.5f})")
-
-    # 输出
-    if no_download:
-        console.print(f"\n图片 URL: {image_url}")
-        console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
-    else:
-        if not output:
-            ts = _time.strftime("%Y%m%d_%H%M%S")
-            output = f"output/gpt_img_{ts}.{output_format}"
-
-        try:
-            saved = _gpt_download_image(image_url, output, proxies=proxies)
-            file_size = Path(saved).stat().st_size
-            console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
-        except Exception as e:
-            console.print(f"[red]下载失败: {e}[/red]")
-            console.print(f"图片 URL（有效期 24 小时）: {image_url}")
-            raise typer.Exit(1)
-
-    console.print(f"[dim]URL: {image_url}[/dim]")
-
-
-# ── image 子命令 ─────────────────────────────────────────────────
-
-@app.command("image")
-def image_cmd(
-    prompt: str = typer.Argument(help="提示词或图像编辑指令"),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出图片路径（默认: output/image_<时间戳>.png）"),
-    size: str = typer.Option("2:3", "-s", "--size", help="输出分辨率：宽*高（如 1024*1536）或宽高比（如 2:3, 16:9）"),
-    model: str = typer.Option("", "--model", help="模型名称（默认读取 .env IMAGE_MODEL，默认为 qwen-image-3.0）"),
-    image: Optional[list[str]] = typer.Option(None, "-i", "--image", help="编辑输入图片路径、URL 或 data URI，可重复指定，最多 3 张"),
-    negative_prompt: Optional[str] = typer.Option(None, "--negative-prompt", help="负向提示词"),
-    n: int = typer.Option(1, "--n", help="生成张数（1~6）"),
-    prompt_extend: bool = typer.Option(True, "--prompt-extend/--no-prompt-extend", help="启用 Qwen Image 智能提示词改写（默认开启）"),
-    seed: Optional[int] = typer.Option(None, "--seed", help="随机种子（0~2147483647）"),
-    watermark: bool = typer.Option(False, "--watermark/--no-watermark", help="是否添加水印"),
-    no_download: bool = typer.Option(False, "--no-download", help="仅返回图片 URL，不下载到本地"),
-    env_file: Optional[str] = typer.Option(None, "--env-file", help=".env 文件路径"),
-):
-    """使用阿里云 Qwen Image 3.0 进行文生图或图像编辑。
-
-    不提供 --image 时执行文生图；提供 1~3 张 --image 时执行图像编辑。
-    提示词会直接发送给 Qwen Image；可通过 --prompt-extend 控制模型自身的提示词改写。
-    """
-    load_env(env_file)
-    api_key, cfg_model = get_image_config()
-    use_model = model or cfg_model
-    editing = bool(image)
-
-    console.print(f"[bold]=== {'图像编辑' if editing else '文生图'} (Qwen Image 3.0) ===[/bold]")
-    console.print(f"原始提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-    console.print(f"分辨率: {size} | 模型: {use_model}")
-    if image:
-        console.print(f"参考图: {len(image)} 张")
-
-    import time
-    t0 = time.time()
-    try:
-        result = generate_image(
-            prompt=prompt,
-            api_key=api_key,
-            size=size,
-            model=use_model,
-            prompt_extend=prompt_extend,
-            seed=seed,
-            images=image,
-            negative_prompt=negative_prompt,
-            n=n,
-            watermark=watermark,
-        )
-    except ValueError as e:
-        console.print(f"[red]参数错误: {e}[/red]")
-        raise typer.Exit(1)
-    except RuntimeError as e:
-        console.print(f"[red]生成失败: {e}[/red]")
-        raise typer.Exit(1)
-
-    elapsed = time.time() - t0
-    image_urls = result.get("image_urls") or []
-    if not image_urls and result.get("image_url"):
-        image_urls = [result["image_url"]]
-    if not image_urls:
-        console.print("[red]未获取到图片 URL[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]生成成功![/green] ({elapsed:.1f}s) {result.get('width')}*{result.get('height')}，共 {len(image_urls)} 张")
-    if result.get("text") and prompt_extend:
-        console.print(f"[dim]改写后提示词: {result['text'][:200]}[/dim]")
-
-    if no_download:
-        for index, image_url in enumerate(image_urls, 1):
-            console.print(f"\n图片 URL {index}: {image_url}")
-        console.print("[yellow]注意: URL 有效期 24 小时，请及时保存[/yellow]")
-        return
-
-    if not output:
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        output = f"output/image_{ts}.png"
-
-    try:
-        for index, image_url in enumerate(image_urls, 1):
-            save_path = output
-            if len(image_urls) > 1:
-                output_path = Path(output)
-                save_path = str(output_path.with_name(f"{output_path.stem}_{index}{output_path.suffix or '.png'}"))
-            saved = download_image(image_url, save_path)
-            file_size = Path(saved).stat().st_size
-            console.print(f"[green]已保存:[/green] {saved} ({file_size / 1024:.0f} KB)")
-            console.print(f"[dim]URL {index}: {image_url}[/dim]")
-    except Exception as e:
-        console.print(f"[red]下载失败: {e}[/red]")
-        raise typer.Exit(1)
 
 
 # ── check-api 子命令 ──────────────────────────────────────────────
@@ -1809,10 +1845,25 @@ def ai_daily(
 
 # ── 入口 ──────────────────────────────────────────────────────────
 
+# 帮助列表顺序：模态组优先，工具命令在后（typer 默认先注册 @app.command、后注册组）
+_HELP_ORDER = ["media", "music", "image", "video", "speech",
+               "local-tts", "check-api", "comfyui", "aigate", "news"]
+
+
 def main():
     from .logger import install_tee
     install_tee()
-    app()
+    try:
+        # 复用 typer 的构建逻辑，仅重排 click 组的命令展示顺序
+        from typer import main as _typer_main
+        if sys.excepthook != _typer_main.except_hook:
+            sys.excepthook = _typer_main.except_hook
+        _cmd = _typer_main.get_command(app)
+        _cmd.commands = {name: _cmd.commands[name] for name in _HELP_ORDER if name in _cmd.commands}
+        _cmd()
+    except Exception:
+        # 构建/排序失败时回退到 typer 原生入口
+        app()
 
 
 if __name__ == "__main__":

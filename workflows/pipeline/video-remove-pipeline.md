@@ -31,7 +31,7 @@
 若 `input/videos/` 中已有本地视频文件，直接进入 Step 1。若只有抖音视频链接，先下载到该目录：
 
 ```bash
-opc douyin \
+opc media download \
   "https://www.douyin.com/video/7663055524247118822?modeFrom=userPost&secUid=MS4wLjABAAAAubBZMv-N8jz9cHpD5u5yagiQN9kisi48b_IE7mYwNG8" \
   --cookies "www.douyin.com_cookies.txt" \
   --output-dir "input/videos"

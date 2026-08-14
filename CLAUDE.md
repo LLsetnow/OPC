@@ -6,27 +6,28 @@
 
 | 需求场景 | 命令 | 说明 |
 |---|---|---|
-| B站视频下载/转写/总结 | `opc bili "URL"` | 下载音频 → ASR转写 → 内容总结 |
-| B站视频下載MP3音频 | `opc bili "URL" --audio-only` | 下载音频 → 转为MP3（含ID3元数据） |
-| 仅下载B站音频 | `opc bili "URL" --audio-only` | 转为MP3，不做ASR转写 |
-| 跳过下载直接转写 | `opc bili --skip-download` | 从output目录查找已有音频 |
-| 跳过下载和ASR直接总结 | `opc bili --skip-download --skip-asr` | 从output目录查找已有字幕 |
-| 单独ASR转写 | `opc asr audio.wav` | 将音频转写为 SRT + JSON 字幕 |
-| 语音识别(LLM修复) | `opc asr audio.wav --llm-fix` | LLM 修复断词和标点错误 |
-| 音乐理解 | `opc audio audio.m4a` | 使用 Qwen3-Omni Captioner 分析曲风、乐器、情绪和结构 |
-| 音乐鼓点检测 | `opc audio librosa audio.m4a` | 使用 librosa 输出筛选后的 BPM、节拍和起音时刻 |
-| 文字转语音(CosyVoice) | `opc tts "文本" -o output.wav` | 默认 CosyVoice v3-flash + 龙呼呼音色，支持音色克隆 |
+| 媒体下载/总结（多平台） | `opc media download "URL" [--summarize]` | URL 自动识别 B站/抖音/X/网易云；--summarize 下载音频→ASR转写→内容总结 |
+| B站视频下载MP3音频 | `opc media download "URL" --audio-only` | 下载音频 → 转为MP3（含ID3元数据） |
+| 仅下载B站音频 | `opc media download "URL"` | 下载音频文件（不转换） |
+| 跳过下载直接转写 | `opc media download "URL" --summarize --skip-download` | 从output目录查找已有音频 |
+| 跳过下载和ASR直接总结 | `opc media download "URL" --summarize --skip-download --skip-asr` | 从output目录查找已有字幕 |
+| 抖音/X 视频下载 | `opc media download "URL"` | 下载为 MP4（X 通常需 `--cookies` 登录凭证） |
+| 网易云音乐下载 | `opc media download "URL"` | 单曲/专辑/歌单 → MP3（含ID3元数据），支持 --bitrate/--playlist |
+| 单独ASR转写 | `opc speech asr audio.wav` | 将音频转写为 SRT + JSON 字幕 |
+| 语音识别(LLM修复) | `opc speech asr audio.wav --llm-fix` | LLM 修复断词和标点错误 |
+| 文字转语音(CosyVoice) | `opc speech tts "文本" -o output.wav` | 默认 CosyVoice v3-flash + 龙呼呼音色，支持音色克隆 |
+| 文字转语音(智谱GLM) | `opc speech tts "文本" --engine glm-tts` | 切换智谱 GLM-TTS 引擎 |
 | 文字转语音(本地Qwen3) | `opc local-tts "文本" -o output.wav` | 本地模型，需GPU |
-| 图片理解/分析 | `opc read-img image.png` | 支持本地图片和URL，自动压缩超大图 |
-| 自定义图片提问 | `opc read-img image.png -p "问题"` | 如分析UI控件位置 |
-| UI截图转Vue组件 | `opc ui2vue ui.png` | 三步流程：分析→生成→修复 |
-| UI转Vue指定框架 | `opc ui2vue ui.png -f element-plus` | 支持7种UI框架 |
-| 文生图(GPT-Image) | `opc gpt-img "描述"` | 支持图生图、宽高比、分辨率 |
-| 文生图(阿里云) | `opc Z-image "描述"` | 支持种子复现、提示词改写 |
+| 音乐理解 | `opc music understand audio.m4a` | 使用 Qwen3-Omni Captioner 分析曲风、乐器、情绪和结构 |
+| 音乐鼓点检测 | `opc music beats audio.m4a` | 使用 librosa 输出筛选后的 BPM、节拍和起音时刻 |
+| 音乐生成 | `opc music generate "描述"` | 阿里云 Fun-Music / MiniMax 生成歌曲或纯音乐 |
+| 视频理解 | `opc video understand video.mp4` | 使用 Qwen3-VL 分析视频内容、镜头运动、构图和时间线 |
+| 图片理解/分析 | `opc image understand image.png` | 支持本地图片和URL，自动压缩超大图 |
+| 自定义图片提问 | `opc image understand image.png -p "问题"` | 如分析UI控件位置 |
+| 文生图(阿里云Qwen) | `opc image generate "描述"` | Qwen Image 3.0 文生图/图生图/图像编辑 |
+| 文生图(GPT-Image) | `opc image generate "描述" --engine gpt-image` | OpenAI 官方模型，支持图生图、宽高比、分辨率 |
 | API连通性检查 | `opc check-api` | 检查.env中各API可用性 |
 | AI日报 | `opc news` | 自动收集AI新闻生成简报 |
-| 网易云音乐下载 | `opc music "URL"` | 下载网易云单曲/专辑/歌单 → MP3（含ID3元数据） |
-| X (Twitter) 视频下载 | `opc x "URL"` | 下载 X 视频为 MP4（视频通常需 `--cookies` 登录凭证） |
 | ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |
 | ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
 | ComfyUI指定工作流 | `opc comfyui --run -w 工作流 -i 图片 -p 提示词` | 指定工作流/提示词/种子/采样参数 |
@@ -151,14 +152,14 @@ opc aigate --run \
 
 `opc` 安装在 WSL 的虚拟环境中，执行任何 `opc` 命令前**必须**先激活 venv：
 
-- **常规命令**（bili/music/tts/read-img/ui2vue/gpt-img/Z-image/check-api/news/comfyui）：使用 `~/qwen3-tts-venv`
+- **常规命令**（media/music/image/video/speech/local-tts/check-api/news/comfyui/aigate）：使用 `~/qwen3-tts-venv`
 - **local-tts**（本地Qwen3-TTS）：使用 `~/qwen3-tts-venv`（需要 torch）
 
 ### 命令执行格式
 
 ```bash
 # 常规命令（激活 qwen3-tts-venv）
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc local-tts <参数>"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc speech tts <参数>"
 ```
 
 ### 常用命令速查
@@ -168,46 +169,49 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc check-api"
 
 # 单独ASR转写（音频→字幕）
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc asr audio.wav"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc speech asr audio.wav"
 
 # ASR + LLM 断句修复
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc asr audio.wav --llm-fix"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc speech asr audio.wav --llm-fix"
 
 # 音乐理解（Qwen3-Omni Captioner；密钥从 .env 的 ALIYUN_API_KEY 读取）
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc audio audio.m4a"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music understand audio.m4a"
 
 # librosa 鼓点检测（不调用云端模型）
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc audio librosa audio.m4a"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music beats audio.m4a"
+
+# 音乐生成
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music generate '夏日清新民谣'"
 
 # B站视频下载MP3
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc bili 'https://www.bilibili.com/video/BV1xx' --audio-only"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx' --audio-only"
 
-# B站视频完整流程
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc bili 'https://www.bilibili.com/video/BV1xx'"
+# B站视频完整流程（下载→ASR→总结，多平台通用）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx' --summarize"
+
+# 网易云音乐下载（单曲/专辑/歌单）
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://music.163.com/song?id=2143914149'"
+
+# 网易云音乐下载到指定目录 + 高比特率
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://music.163.com/playlist?id=xxx' -o ./music --bitrate 320"
 
 # TTS 文字转语音
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc tts '你好世界' -o output.wav"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc speech tts '你好世界' -o output.wav"
 
 # 图片理解
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc read-img photo.jpg -p '描述这张图片'"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc image understand photo.jpg -p '描述这张图片'"
 
-# UI截图转Vue
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc ui2vue ui.png -f element-plus"
+# 视频理解
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc video understand video.mp4"
+
+# 文生图(阿里云 Qwen Image)
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc image generate '一只穿着宇航服的猫'"
 
 # 文生图(GPT-Image)
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc gpt-img '一只穿着宇航服的猫'"
-
-# 文生图(阿里云)
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc Z-image '山水画'"
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc image generate '一只穿着宇航服的猫' --engine gpt-image"
 
 # AI日报
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc news"
-
-# 网易云音乐下载（单曲/专辑/歌单）
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music 'https://music.163.com/song?id=2143914149'"
-
-# 网易云音乐下载到指定目录 + 高比特率
-wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc music 'https://music.163.com/playlist?id=xxx' -o ./music --bitrate 320"
 
 # ComfyUI 工作流（使用默认 Qwen_remove 工作流处理图片）
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc comfyui --run -i photo.jpg"

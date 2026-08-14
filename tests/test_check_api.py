@@ -27,12 +27,12 @@ class CheckApiTests(unittest.TestCase):
                 item.command: item for item in get_command_availability()
             }
 
-        self.assertEqual(availability["asr"].status, "不可用")
-        self.assertEqual(availability["audio"].status, "不可用")
-        self.assertEqual(availability["tts"].status, "不可用")
+        self.assertEqual(availability["speech asr"].status, "不可用")
+        self.assertEqual(availability["music understand"].status, "不可用")
+        self.assertEqual(availability["speech tts"].status, "不可用")
         self.assertEqual(availability["local-tts"].status, "可用")
-        self.assertEqual(availability["douyin"].status, "可用")
-        self.assertEqual(availability["bili"].status, "部分可用")
+        self.assertEqual(availability["music beats"].status, "可用")
+        self.assertEqual(availability["media download"].status, "部分可用")
 
     def test_provider_keys_enable_the_expected_commands(self):
         env = {
@@ -46,13 +46,12 @@ class CheckApiTests(unittest.TestCase):
                 item.command: item for item in get_command_availability()
             }
 
-        self.assertEqual(availability["asr"].status, "可用")
-        self.assertEqual(availability["image"].status, "可用")
-        self.assertEqual(availability["gpt-img"].status, "可用")
-        self.assertEqual(availability["bili"].status, "可用")
+        self.assertEqual(availability["speech asr"].status, "可用")
+        self.assertEqual(availability["image generate"].status, "可用")
+        self.assertEqual(availability["media download"].status, "可用")
         self.assertEqual(availability["aigate"].status, "可用")
-        self.assertEqual(availability["audio"].status, "可用")
-        self.assertEqual(availability["music-gen"].status, "可用")
+        self.assertEqual(availability["music understand"].status, "可用")
+        self.assertEqual(availability["music generate"].status, "可用")
 
     def test_minimax_key_alone_enables_music_generation(self):
         with patch.dict(
@@ -64,8 +63,8 @@ class CheckApiTests(unittest.TestCase):
                 item.command: item for item in get_command_availability()
             }
 
-        self.assertEqual(availability["music-gen"].status, "可用")
-        self.assertIn("MiniMax Music", availability["music-gen"].detail)
+        self.assertEqual(availability["music generate"].status, "可用")
+        self.assertIn("MiniMax Music", availability["music generate"].detail)
 
     def test_check_map_includes_all_dashscope_audio_checks(self):
         self.assertIn("deepseek", CHECK_MAP)
@@ -171,7 +170,7 @@ class CheckApiTests(unittest.TestCase):
             "opc_cli.cli.get_api_config",
             side_effect=AssertionError("default Qwen TTS should not load Zhipu config"),
         ), patch("opc_cli.cli.text_to_speech") as text_to_speech:
-            result = runner.invoke(cli.app, ["tts", "hello"])
+            result = runner.invoke(cli.app, ["speech", "tts", "hello"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(text_to_speech.call_args.kwargs["engine"], "qwen-tts")
@@ -202,10 +201,10 @@ class CheckApiTests(unittest.TestCase):
             }
 
         self.assertEqual(availability["news"].status, "不可用")
-        self.assertEqual(availability["asr"].status, "不可用")
-        self.assertEqual(availability["image"].status, "不可用")
-        self.assertEqual(availability["music-gen"].status, "不可用")
-        self.assertEqual(availability["tts"].status, "不可用")
+        self.assertEqual(availability["speech asr"].status, "不可用")
+        self.assertEqual(availability["image generate"].status, "不可用")
+        self.assertEqual(availability["music generate"].status, "不可用")
+        self.assertEqual(availability["speech tts"].status, "不可用")
 
 
 if __name__ == "__main__":

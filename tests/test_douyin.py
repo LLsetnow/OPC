@@ -71,8 +71,8 @@ class DouyinDownloadTests(unittest.TestCase):
                 os.environ,
                 {"DOUYIN_FOLDER": str(output_dir), "YT_DLP_COOKIES": "cookies.txt"},
                 clear=False,
-            ), patch("opc_cli.cli.download_douyin_video", return_value=str(output_file)) as download:
-                result = runner.invoke(cli.app, ["douyin", "https://www.douyin.com/video/123"])
+            ), patch("opc_cli.media.download_douyin_video", return_value=str(output_file)) as download:
+                result = runner.invoke(cli.app, ["media", "download", "https://www.douyin.com/video/123"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn(str(output_file), result.output)

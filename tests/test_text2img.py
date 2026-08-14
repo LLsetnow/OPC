@@ -67,7 +67,7 @@ class QwenImageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_image_reference("missing-image.png")
 
-    def test_cli_exposes_image_without_ui2vue_or_z_image(self):
+    def test_cli_exposes_image_group_without_ui2vue_or_z_image(self):
         from typer.testing import CliRunner
         from opc_cli.cli import app
 
@@ -79,7 +79,14 @@ class QwenImageTests(unittest.TestCase):
 
         image_help = CliRunner().invoke(app, ["image", "--help"])
         self.assertEqual(image_help.exit_code, 0, image_help.output)
+        self.assertIn("understand", image_help.output)
+        self.assertIn("generate", image_help.output)
         self.assertNotIn("--enhance", image_help.output)
+
+        generate_help = CliRunner().invoke(app, ["image", "generate", "--help"])
+        self.assertEqual(generate_help.exit_code, 0, generate_help.output)
+        self.assertIn("--engine", generate_help.output)
+        self.assertIn("--enhance", generate_help.output)
 
 
 if __name__ == "__main__":

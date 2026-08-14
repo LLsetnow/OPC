@@ -55,7 +55,8 @@ class MusicGenerationTests(unittest.TestCase):
         result = CliRunner().invoke(
             cli.app,
             [
-                "music-gen",
+                "music",
+                "generate",
                 "梦幻电子流行",
                 "--provider",
                 "minimax",

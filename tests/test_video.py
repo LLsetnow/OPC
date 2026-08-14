@@ -113,6 +113,7 @@ class VideoUnderstandingTests(unittest.TestCase):
                     cli.app,
                     [
                         "video",
+                        "understand",
                         "input.mp4",
                         "-p",
                         "分析镜头运动",

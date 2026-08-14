@@ -1,6 +1,6 @@
 # OPC CLI
 
-OPC 工具集命令行界面 —— B站视频转写、抖音 MP4 下载 + 语音合成 + 本地TTS + 图片理解 + UI转Vue + 文生图 + 本地/云扉 ComfyUI + AI日报。
+OPC 工具集命令行界面 —— 命令采用「模态 + 动词」两级结构：`opc <模态> <动词> [参数]`。覆盖媒体下载/总结、音乐理解/生成、图片理解/生成、视频理解、语音合成/识别、本地TTS、本地/云扉 ComfyUI、AI日报。
 
 ## 安装
 
@@ -29,22 +29,21 @@ cp .env.example .env
 ## 命令一览
 
 ```
-opc                  显示帮助
-opc bili             B站视频下载 + ASR 转写 + 内容总结
-opc douyin           抖音视频下载为 MP4
-opc asr              语音识别：音频 → SRT/JSON 字幕
-opc audio            音乐理解：使用 Qwen3-Omni Captioner 分析音频
-opc music-gen        音乐生成：使用阿里云 Fun-Music 生成歌曲或纯音乐
-opc tts              文字转语音（支持音色克隆）
-opc local-tts        本地语音合成 + 服务管理（Qwen3-TTS）
-opc read-img         图片理解：使用视觉模型分析图片内容
-opc video            视频理解：使用 Qwen3-VL 分析视频和镜头运动
-opc gpt-img          GPT-Image-2 文生图
-opc image            阿里云 Qwen Image 3.0 文生图或图像编辑
-opc comfyui          ComfyUI 进程管理 + 工作流提交
-opc aigate           云扉 AIGate ComfyUI 实例管理 + 工作流提交
-opc check-api        检查 .env 中 API 的连通性
-opc news             AI 日报：自动收集 AI 新闻并生成简报
+opc                             显示帮助
+opc media download <URL>        媒体下载/总结（B站/抖音/X/网易云，URL 自动识别平台；--summarize 下载→ASR→总结）
+opc music understand <音频>     音乐理解：使用 Qwen3-Omni Captioner 分析音频
+opc music beats <音频>          librosa 鼓点检测：BPM、节拍和起音时刻
+opc music generate <描述>       音乐生成：使用阿里云 Fun-Music / MiniMax 生成歌曲或纯音乐
+opc image understand <图片>     图片理解：使用视觉模型分析图片内容
+opc image generate <描述>       文生图/图生图/图像编辑（--engine qwen | gpt-image）
+opc video understand <视频>     视频理解：使用 Qwen3-VL 分析视频和镜头运动
+opc speech tts <文本>           文字转语音（CosyVoice / GLM-TTS，支持音色克隆）
+opc speech asr <音频>           语音识别：音频 → SRT/JSON 字幕
+opc local-tts                   本地语音合成 + 服务管理（Qwen3-TTS）
+opc comfyui                     ComfyUI 进程管理 + 工作流提交
+opc aigate                      云扉 AIGate ComfyUI 实例管理 + 工作流提交
+opc check-api                   检查 .env 中 API 的连通性
+opc news                        AI 日报：自动收集 AI 新闻并生成简报
 ```
 
 ---
@@ -53,19 +52,19 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 
 | 环境变量 | 用途 | 涉及命令 |
 |---|---|---|
-| `DEEPSEEK_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | DeepSeek 通用 LLM（总结/日报/提示词丰富） | bili, news, asr --llm-fix, gpt-img, check-api |
-| `ZHIPU_API_KEY` / `ZHIPU_BASE_URL` | 智谱 API（GLM-TTS、音色克隆、视觉模型） | tts --engine glm-tts, read-img, check-api |
-| `ALIYUN_API_KEY` / `ASR_MODEL` / `QWEN_TTS_MODEL` / `IMAGE_MODEL` / `AUDIO_MODEL` / `VIDEO_MODEL` | 阿里云 DashScope 统一凭证：ASR、CosyVoice TTS、Qwen Image 3.0、Qwen3-Omni 音乐理解、Qwen3-VL 视频理解 | asr, bili, tts (默认), image, audio, video, music-gen (aliyun) |
-| `VIDEO_BASE_URL` / `VIDEO_MODEL` | Qwen3-VL 视频理解的 OpenAI 兼容接口和模型 | video |
-| `MUSIC_GEN_PROVIDER` / `MUSIC_GEN_MODEL` / `MUSIC_GEN_WORKSPACE_ID` / `MUSIC_GEN_BASE_URL` | 阿里云 Fun-Music 音乐生成配置 | music-gen --provider aliyun |
-| `MINIMAX_API_KEY` / `MINIMAX_MUSIC_MODEL` / `MINIMAX_MUSIC_BASE_URL` | MiniMax Music 音乐生成配置 | music-gen --provider minimax |
-| `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | gpt-img |
-| `GPT_IMG_PROXY` | gpt-img 代理，WSL 下自动启用 | gpt-img (--proxy) |
-| `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | bili, douyin |
-| `BILI_FOLDER` | bili 默认输出目录 | bili |
-| `DOUYIN_FOLDER` | douyin 默认输出目录 | douyin |
-| `X_FOLDER` | X 视频默认输出目录 | x |
-| `MUSIC_FOLDER` | 网易云音乐默认输出目录 | music |
+| `DEEPSEEK_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | DeepSeek 通用 LLM（总结/日报/提示词丰富） | media download --summarize, news, speech asr --llm-fix, image generate --engine gpt-image, check-api |
+| `ZHIPU_API_KEY` / `ZHIPU_BASE_URL` | 智谱 API（GLM-TTS、音色克隆、视觉模型） | speech tts --engine glm-tts, image understand, check-api |
+| `ALIYUN_API_KEY` / `ASR_MODEL` / `QWEN_TTS_MODEL` / `IMAGE_MODEL` / `AUDIO_MODEL` / `VIDEO_MODEL` | 阿里云 DashScope 统一凭证：ASR、CosyVoice TTS、Qwen Image 3.0、Qwen3-Omni 音乐理解、Qwen3-VL 视频理解 | speech asr, media download --summarize, speech tts (默认), image generate, music understand, video understand, music generate (aliyun) |
+| `VIDEO_BASE_URL` / `VIDEO_MODEL` | Qwen3-VL 视频理解的 OpenAI 兼容接口和模型 | video understand |
+| `MUSIC_GEN_PROVIDER` / `MUSIC_GEN_MODEL` / `MUSIC_GEN_WORKSPACE_ID` / `MUSIC_GEN_BASE_URL` | 阿里云 Fun-Music 音乐生成配置 | music generate --provider aliyun |
+| `MINIMAX_API_KEY` / `MINIMAX_MUSIC_MODEL` / `MINIMAX_MUSIC_BASE_URL` | MiniMax Music 音乐生成配置 | music generate --provider minimax |
+| `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | image generate --engine gpt-image |
+| `GPT_IMG_PROXY` | gpt-image 代理，WSL 下自动启用 | image generate --engine gpt-image (--proxy) |
+| `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | media download |
+| `BILI_FOLDER` | B站默认输出目录 | media download |
+| `DOUYIN_FOLDER` | 抖音默认输出目录 | media download |
+| `X_FOLDER` | X 视频默认输出目录 | media download |
+| `MUSIC_FOLDER` | 网易云音乐默认输出目录 | media download |
 | `NEWS_FOLDER` | news 默认输出目录 | news |
 | `COMFYUI_ROOT` | ComfyUI 根目录 | comfyui --start |
 | `AIGATE_TOKEN` | 云扉 Bearer Token | aigate |
@@ -73,59 +72,77 @@ opc news             AI 日报：自动收集 AI 新闻并生成简报
 
 ---
 
-## bili — B站视频转写
+## media download — 统一媒体下载/总结
 
-从 Bilibili 视频下载音频，进行 ASR 语音识别，生成 SRT 字幕和 Markdown 内容总结。
+从 B站/抖音/X/网易云链接下载媒体，URL 自动识别平台。B站/抖音/X 可加 `--summarize` 走「下载音频 → ASR 转写 → 内容总结」流水线（多平台通用）；网易云下载为带 ID3 元数据的 MP3。
 
 ### 使用范例
 
 ```bash
-# 完整流程：下载 → ASR → 总结
-opc bili "https://www.bilibili.com/video/BV1xx"
+# 完整流程：下载 → ASR → 总结（B站/抖音/X 通用）
+opc media download "https://www.bilibili.com/video/BV1xx" --summarize
 
 # 指定输出目录
-opc bili "https://..." -o ./my_output
+opc media download "https://..." -o ./my_output --summarize
 
-# 仅下载音频并转为 MP3（带 ID3 元数据）
-opc bili "https://..." --audio-only
+# 仅下载 B站音频并转为 MP3（带 ID3 元数据）
+opc media download "https://..." --audio-only
 
 # 指定 MP3 比特率，或跳过元数据写入
-opc bili "https://..." --audio-only --bitrate 320
-opc bili "https://..." --audio-only --no-metadata
+opc media download "https://..." --audio-only --bitrate 320
+opc media download "https://..." --audio-only --no-metadata
 
 # 跳过下载，从 output 目录自动查找已有音频文件
-opc bili --skip-download
+opc media download "URL" --summarize --skip-download
 
 # 跳过下载，手动指定音频文件
-opc bili --skip-download --audio-file ./output/audio.m4a
+opc media download "URL" --summarize --skip-download --audio-file ./output/audio.m4a
 
 # 跳过下载和 ASR，从 output 目录自动查找已有字幕文件生成总结
-opc bili --skip-download --skip-asr
+opc media download "URL" --summarize --skip-download --skip-asr
 
 # 跳过 ASR，手动指定字幕文件
-opc bili "https://..." --skip-download --skip-asr --asr-file ./output/audio.srt
+opc media download "URL" --summarize --skip-download --skip-asr --asr-file ./output/audio.srt
 
 # 使用 cookies 下载需要登录的视频
-opc bili "https://..." --cookies ./cookies.txt
+opc media download "https://..." --cookies ./cookies.txt
+
+# 抖音视频下载为 MP4
+opc media download "https://www.douyin.com/video/7644571768053571003"
+
+# 抖音视频下载到指定目录（登录可见或受限视频使用 cookies）
+opc media download "https://www.douyin.com/video/7644571768053571003" -o ./videos --cookies ./cookies.txt
+
+# X (Twitter) 视频下载（通常需要 cookies）
+opc media download "https://x.com/i/status/2038177089082261736" --cookies ~/cookies.txt
+
+# 网易云音乐下载（单曲/专辑/歌单）
+opc media download "https://music.163.com/song?id=2143914149"
+
+# 网易云音乐下载到指定目录 + 高比特率
+opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 320
 ```
 
 ### 参数
 
 | 参数 | 简写 | 默认值 | 说明 |
 |---|---|---|---|
-| `url` | | | Bilibili 视频链接（`--skip-download` 时可省略） |
-| `--output-dir` | `-o` | `./output` | 输出目录 |
-| `--cookies` | | | yt-dlp cookies 文件路径 |
-| `--audio-only` | | `false` | 下载音频并转为 MP3，不进行 ASR |
-| `--bitrate` | | `192` | MP3 比特率（仅 `--audio-only` 生效） |
-| `--no-metadata` | | `false` | 跳过 MP3 的 ID3 元数据写入（仅 `--audio-only` 生效） |
-| `--skip-download` | | `false` | 跳过下载，从 output-dir 自动查找音频 |
-| `--audio-file` | | | 手动指定已有音频文件路径 |
-| `--skip-asr` | | `false` | 跳过 ASR，从 output-dir 自动查找字幕文件 |
-| `--asr-file` | | | 手动指定 ASR JSON 或 SRT 文件路径 |
+| `url` | | | 媒体链接，自动识别平台：bilibili.com / b23.tv / douyin.com / x.com / twitter.com / music.163.com |
+| `--output-dir` | `-o` | 按平台读 `BILI_FOLDER`/`DOUYIN_FOLDER`/`X_FOLDER`/`MUSIC_FOLDER` 或 `./output` | 输出目录 |
+| `--cookies` | | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 |
+| `--audio-only` | | `false` | 仅下载音频并转为 MP3（仅 bilibili 生效） |
+| `--bitrate` | | `192` | MP3 比特率（`--audio-only` 或网易云时生效） |
+| `--no-metadata` | | `false` | 跳过 MP3 的 ID3 元数据写入 |
+| `--playlist` | | `false` | 下载全部曲目（网易云专辑/歌单/歌手链接默认已启用） |
+| `--summarize` | | `false` | 下载音频 → ASR 转写 → 内容总结（B站/抖音/X 通用） |
+| `--skip-download` | | `false` | 跳过下载，从 output-dir 自动查找音频（需 `--summarize`） |
+| `--audio-file` | | | 手动指定已有音频文件路径（需 `--summarize`） |
+| `--skip-asr` | | `false` | 跳过 ASR，从 output-dir 自动查找字幕文件（需 `--summarize`） |
+| `--asr-file` | | | 手动指定 ASR JSON 或 SRT 文件路径（需 `--summarize`） |
+| `--llm-fix` | | `false` | 使用 LLM 修复 ASR 断词和标点错误 |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
-### 输出文件
+### 输出文件（--summarize 模式）
 
 | 文件 | 说明 |
 |---|---|
@@ -135,35 +152,11 @@ opc bili "https://..." --cookies ./cookies.txt
 | `{title}.asr.json` | ASR 原始结果（JSON） |
 | `{title}.md` | Markdown 内容总结（含视频时间线链接） |
 
----
-
-## douyin — 抖音 MP4 下载
-
-下载单个抖音视频并保存为 MP4。优先保留原生 MP4 视频流和 M4A 音轨；其他可用流会由 ffmpeg 封装为 MP4，不会重新编码。
-
-```bash
-# 下载到 ./output
-opc douyin "https://www.douyin.com/video/7644571768053571003"
-
-# 指定输出目录
-opc douyin "https://www.douyin.com/video/7644571768053571003" -o ./videos
-
-# 登录可见或受限视频使用 cookies
-opc douyin "https://www.douyin.com/video/7644571768053571003" --cookies ./cookies.txt
-```
-
-| 参数 | 简写 | 默认值 | 说明 |
-|---|---|---|---|
-| `url` | | | 抖音视频链接 |
-| `--output-dir` | `-o` | `DOUYIN_FOLDER` 或 `./output` | 输出目录 |
-| `--cookies` | | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 |
-| `--env-file` | | | 自定义 `.env` 文件路径 |
-
-抖音的登录、年龄限制或反爬校验可能要求导出登录后的 cookies。请只下载有权保存或使用的视频。
+抖音的登录、年龄限制或反爬校验可能要求导出登录后的 cookies；X 大量视频对未登录用户不可见，报 "No video could be found" 时请用 `--cookies` 重试。请只下载有权保存或使用的视频。
 
 ---
 
-## asr — 语音识别
+## speech asr — 语音识别
 
 将音频文件转写为 SRT 字幕和 JSON 文件。使用阿里云 DashScope fun-asr-realtime 模型，支持精确时间戳、LLM 智能断句纠错。
 
@@ -171,19 +164,19 @@ opc douyin "https://www.douyin.com/video/7644571768053571003" --cookies ./cookie
 
 ```bash
 # 基本转写
-opc asr audio.wav
+opc speech asr audio.wav
 
 # 指定输出目录
-opc asr recording.mp3 -o ./subtitles
+opc speech asr recording.mp3 -o ./subtitles
 
 # 不进行自动重断句（保留 ASR 原始切分）
-opc asr audio.wav --no-resegment
+opc speech asr audio.wav --no-resegment
 
 # 使用 LLM 修复断词和标点错误
-opc asr audio.wav --llm-fix
+opc speech asr audio.wav --llm-fix
 
 # 只识别前 N 秒（方便测试）
-opc asr audio.wav -t 60
+opc speech asr audio.wav -t 60
 ```
 
 ### 参数
@@ -217,31 +210,31 @@ opc asr audio.wav -t 60
 
 ---
 
-## tts — 文字转语音（CosyVoice + GLM-TTS）
+## speech tts — 文字转语音（CosyVoice + GLM-TTS）
 
-默认使用阿里云 CosyVoice v3-flash 模型，音色为 **龙呼呼（天真烂漫女童）**。同时支持智谱 GLM-TTS 引擎（`--engine glm-tts`）。
+默认使用阿里云 CosyVoice v3-flash 模型，音色为 **龙呼呼（天真烂漫女童）**。同时支持智谱 GLM-TTS 引擎（`--engine glm-tts`）。本地 Qwen3-TTS 使用独立命令 `opc local-tts`。
 
 ### 使用范例
 
 ```bash
 # 默认 (CosyVoice v3-flash + 龙呼呼音色)
-opc tts "你好，今天天气真不错" -o output.wav
+opc speech tts "你好，今天天气真不错" -o output.wav
 
 # 指定 CosyVoice 音色
-opc tts "欢迎收听" -o output.wav --voice longhuhu_v3
-opc tts "新闻播报" -o output.wav --voice longshuo_v3
+opc speech tts "欢迎收听" -o output.wav --voice longhuhu_v3
+opc speech tts "新闻播报" -o output.wav --voice longshuo_v3
 
 # 切换回智谱引擎
-opc tts "你好" -o output.wav --engine glm-tts --voice tongtong
+opc speech tts "你好" -o output.wav --engine glm-tts --voice tongtong
 
 # 调节语速
-opc tts "你好" --speed 1.2
+opc speech tts "你好" --speed 1.2
 
 # 智谱引擎克隆音色
-opc tts "我是克隆的声音" -o output.wav --engine glm-tts --clone --ref-audio ref.wav
+opc speech tts "我是克隆的声音" -o output.wav --engine glm-tts --clone --ref-audio ref.wav
 
 # 克隆时指定参考文本和音色名称
-opc tts "你好世界" -o out.wav --engine glm-tts --clone --ref-audio ref.wav --ref-text "参考音频的文字" --voice-name my_voice
+opc speech tts "你好世界" -o out.wav --engine glm-tts --clone --ref-audio ref.wav --ref-text "参考音频的文字" --voice-name my_voice
 ```
 
 ### 参数
@@ -382,7 +375,7 @@ opc local-tts "你好" -o output.wav --no-server
 
 ---
 
-## read-img — 图片理解
+## image understand — 图片理解
 
 使用视觉模型分析图片内容，支持本地图片和网络 URL，自动压缩超大图片。
 
@@ -390,22 +383,22 @@ opc local-tts "你好" -o output.wav --no-server
 
 ```bash
 # 分析本地图片
-opc read-img photo.jpg
+opc image understand photo.jpg
 
 # 分析网络图片
-opc read-img "https://example.com/image.jpg"
+opc image understand "https://example.com/image.jpg"
 
 # 自定义提问
-opc read-img photo.jpg -p "这张图片里有什么动物？"
+opc image understand photo.jpg -p "这张图片里有什么动物？"
 
 # 输出结果到文件
-opc read-img photo.jpg -o result.txt
+opc image understand photo.jpg -o result.txt
 
 # 增大 max_tokens 获取更详细的回答
-opc read-img photo.jpg --max-tokens 4096
+opc image understand photo.jpg --max-tokens 4096
 
 # 分析 UI 控件的像素位置
-opc read-img ui.png -p "每个控件的相对位置和像素大小是什么"
+opc image understand ui.png -p "每个控件的相对位置和像素大小是什么"
 ```
 
 ### 参数
@@ -427,7 +420,7 @@ opc read-img ui.png -p "每个控件的相对位置和像素大小是什么"
 
 ---
 
-## video — Qwen3-VL 视频理解
+## video understand — Qwen3-VL 视频理解
 
 使用阿里云 DashScope 的 Qwen3-VL 分析视频内容、镜头运动、构图、主体动作和时间线。API Key 使用 `.env` 中的 `ALIYUN_API_KEY`，默认模型为 `qwen3-vl-235b-a22b-instruct`。
 
@@ -435,13 +428,13 @@ opc read-img ui.png -p "每个控件的相对位置和像素大小是什么"
 
 ```bash
 # 分析本地视频
-opc video ./input/video.mp4
+opc video understand ./input/video.mp4
 
 # 重点分析运镜并保存结果
-opc video ./input/video.mp4 -p "按时间段分析镜头运动、景别、推拉摇移和主体动作" -o ./output/video-analysis.txt
+opc video understand ./input/video.mp4 -p "按时间段分析镜头运动、景别、推拉摇移和主体动作" -o ./output/video-analysis.txt
 
 # 分析模型能够直接访问的远程视频 URL
-opc video "https://example.com/video.mp4"
+opc video understand "https://example.com/video.mp4"
 ```
 
 ### 参数
@@ -456,117 +449,150 @@ opc video "https://example.com/video.mp4"
 | `--temperature` | | `0.7` | 生成温度 [0, 1] |
 | `--env-file` | | | 自定义 `.env` 文件路径 |
 
-本地视频会编码为 `data:` URI 后发送；X/Bilibili 帖子页面 URL 不是直接视频 URL，需要先下载视频再调用此命令。
+本地视频会编码为 `data:` URI 后发送；X/Bilibili 帖子页面 URL 不是直接视频 URL，需要先下载视频（`opc media download <URL>`）再调用此命令。
 
 ---
 
-## audio — 音乐理解
+## music understand / music beats — 音乐理解与鼓点检测
 
-使用阿里云 `qwen3-omni-30b-a3b-captioner` 分析本地音频，自动描述曲风、乐器、音色、情绪、氛围和段落结构。API Key 从 `.env` 的 `ALIYUN_API_KEY` 读取。
+使用阿里云 `qwen3-omni-30b-a3b-captioner` 分析本地音频，自动描述曲风、乐器、音色、情绪、氛围和段落结构。API Key 从 `.env` 的 `ALIYUN_API_KEY` 读取。`music beats` 使用 librosa 在本地检测 BPM、节拍和起音时刻，不调用云端模型。
 
 ### 使用范例
 
 ```bash
 # 直接输出音乐分析
-opc audio Hypervoid.m4a
+opc music understand Hypervoid.m4a
 
 # 保存分析结果
-opc audio Hypervoid.m4a -o Hypervoid.analysis.txt
+opc music understand Hypervoid.m4a -o Hypervoid.analysis.txt
 
 # 覆盖默认模型
-opc audio Hypervoid.m4a --model qwen3-omni-30b-a3b-captioner
+opc music understand Hypervoid.m4a --model qwen3-omni-30b-a3b-captioner
 
 # 独立使用 librosa 检测 BPM、节拍和鼓点候选时刻（默认每秒最多保留 1 个）
-opc audio librosa Hypervoid.m4a
+opc music beats Hypervoid.m4a
 
 # 提高阈值，进一步减少弱鼓点；调整最小间隔
-opc audio librosa Hypervoid.m4a --beat-strength-threshold 0.35 --beat-min-interval 1.0
+opc music beats Hypervoid.m4a --beat-strength-threshold 0.35 --beat-min-interval 1.0
 ```
 
-### 参数
+### 参数（understand）
 
 | 参数 | 简写 | 默认值 | 说明 |
 |---|---|---|---|
-| `audio` | | | 输入音频路径，或使用 `librosa` 模式 |
-| `audio_file` | | | `librosa` 模式下的输入音频路径 |
+| `audio` | | | 输入音频路径 |
 | `--output` | `-o` | 终端输出 | 将分析结果保存到文本文件 |
 | `--model` | | `.env` 中的 `AUDIO_MODEL` | 音乐理解模型，默认 `qwen3-omni-30b-a3b-captioner` |
-| `--beat-strength-threshold` | `--beat-threshold` | `0.2` | `librosa` 模式只保留相对强度不低于该值的事件（0～1） |
-| `--beat-min-interval` | | `1.0` 秒 | `librosa` 模式每个时间窗口只保留最强事件 |
 | `--env-file` | | | 自定义 `.env` 文件路径 |
 
-`opc audio librosa <音频>` 会合并 `beat_times` 和 `onset_times` 候选，先按 `beat_strength` 阈值过滤，再按 `beat-min-interval` 窗口只保留最强事件。`beat_times` 是节拍网格，`onset_times` 是更密集的起音候选；`beat_strengths` / `onset_strengths` 是相对于全曲峰值的 0～1 强度估计，不等同于原始鼓机力度。
+### 参数（beats）
+
+| 参数 | 简写 | 默认值 | 说明 |
+|---|---|---|---|
+| `audio` | | | 输入音频路径 |
+| `--output` | `-o` | 终端输出 | 将分析结果保存到文本文件 |
+| `--beat-strength-threshold` | `--beat-threshold` | `0.2` | 只保留相对强度不低于该值的事件（0～1） |
+| `--beat-min-interval` | | `1.0` 秒 | 每个时间窗口只保留最强事件 |
+| `--env-file` | | | 自定义 `.env` 文件路径 |
+
+`opc music beats <音频>` 会合并 `beat_times` 和 `onset_times` 候选，先按 `beat_strength` 阈值过滤，再按 `beat-min-interval` 窗口只保留最强事件。`beat_times` 是节拍网格，`onset_times` 是更密集的起音候选；`beat_strengths` / `onset_strengths` 是相对于全曲峰值的 0～1 强度估计，不等同于原始鼓机力度。
 
 ---
 
-## gpt-img — GPT-Image-2-Official 文生图
+## image generate — 文生图 / 图生图 / 图像编辑
 
-使用 GPT-Image-2-Official（OpenAI 官方模型）根据提示词生成高质量图片，
-异步接口，支持文生图 / 图生图 / 批量生成。默认使用 LLM 丰富提示词。
+两个生成引擎统一入口：默认 `--engine qwen`（阿里云 Qwen Image 3.0），`--engine gpt-image` 切换为 GPT-Image-2-Official（OpenAI 官方模型，异步接口）。qwen 引擎支持文生图和图像编辑（`--image`）；gpt-image 引擎支持文生图/图生图（`--ref`）和批量生成，默认使用 LLM 丰富提示词。
 
 ### 使用范例
 
 ```bash
+# ── qwen 引擎（默认，阿里云 Qwen Image 3.0）──
+
 # 基本文生图
-opc gpt-img "一只穿着宇航服的猫"
+opc image generate "一只穿着宇航服的猫"
 
 # 指定输出路径
-opc gpt-img "山水画" -o ./output/landscape.png
+opc image generate "山水画" -o ./output/landscape.png
+
+# 图像编辑：提供一张本地图片、公开 URL 或 data URI
+opc image generate "把天空改成绚丽的晚霞" --image ./input/landscape.png
+
+# 多图编辑/融合，最多 3 张参考图
+opc image generate "把图 1 的人物换成图 2 的服装" \
+  --image ./input/person.png \
+  --image ./input/clothes.png
+
+# 指定宽高比 / 像素分辨率
+opc image generate "人像" -s 3:4
+opc image generate "高清图" -s 2048*2048
+
+# 启用智能提示词改写（默认开启，可 --no-prompt-extend 关闭）
+opc image generate "风景" --prompt-extend
+
+# 指定随机种子（可复现结果）
+opc image generate "测试" --seed 42
+
+# 仅返回图片 URL
+opc image generate "测试图" --no-download
+
+# ── gpt-image 引擎（OpenAI GPT-Image-2-Official）──
+
+# 基本文生图
+opc image generate "一只穿着宇航服的猫" --engine gpt-image
 
 # 指定宽高比和分辨率
-opc gpt-img "人像" -s 3:4 -r 2k
-opc gpt-img "风景" -s 16:9 -r 1k
+opc image generate "人像" --engine gpt-image -s 3:4 -r 2k
 
-# 指定图片质量
-opc gpt-img "海报" --quality high
-
-# 指定输出格式和压缩强度
-opc gpt-img "照片" --output-format jpeg --output-compression 85
+# 指定图片质量、输出格式和压缩强度
+opc image generate "海报" --engine gpt-image --quality high
+opc image generate "照片" --engine gpt-image --output-format jpeg --output-compression 85
 
 # 不使用 LLM 丰富提示词
-opc gpt-img "a cute cat" --no-enhance
+opc image generate "a cute cat" --engine gpt-image --no-enhance
 
-# 图生图：指定参考图
-opc gpt-img "换成赛博朋克风格" --ref original.png
-
-# 多张参考图
-opc gpt-img "融合这些风格" --ref img1.png --ref img2.png
+# 图生图：指定参考图（可多张）
+opc image generate "换成赛博朋克风格" --engine gpt-image --ref original.png
+opc image generate "融合这些风格" --engine gpt-image --ref img1.png --ref img2.png
 
 # 批量生成 4 张
-opc gpt-img "多种方案" --n 4
+opc image generate "多种方案" --engine gpt-image --n 4
 
 # WSL 下代理自动启用，Windows 下需手动指定
-opc gpt-img "风景" --proxy
-
-# 仅返回图片 URL，不下载
-opc gpt-img "测试图" --no-download
+opc image generate "风景" --engine gpt-image --proxy
 ```
 
 ### 参数
 
 | 参数 | 简写 | 默认值 | 说明 |
 |---|---|---|---|
-| `prompt` | | | 提示词（中英文） |
+| `prompt` | | | 文生图提示词或编辑指令（中英文） |
+| `--engine` | | `qwen` | 生成引擎：`qwen`（阿里云 Qwen Image）/ `gpt-image`（OpenAI GPT-Image） |
 | `--output` | `-o` | 自动生成 | 输出图片路径 |
-| `--size` | `-s` | `2:3` | 宽高比或像素：15种比例 + auto + 像素（如 1024*1536） |
-| `--resolution` | `-r` | `1k` | 分辨率档位：1k / 2k / 4k（全比例支持 4K） |
-| `--quality` | | `auto` | 图片质量：auto / low / medium / high |
-| `--enhance` | | `true` | 使用 LLM 丰富提示词 |
-| `--ref` | | | 参考图路径或 URL（可多次指定，最多16张） |
-| `--n` | | `1` | 生成张数（1 ~ 4） |
-| `--output-format` | | `png` | 输出格式：png / jpeg / webp |
-| `--output-compression` | | | 压缩强度 0-100（仅 jpeg/webp） |
-| `--moderation` | | `auto` | 审核强度：auto / low |
+| `--size` | `-s` | `2:3` | 宽高比（如 2:3, 16:9）或像素（如 1024*1536） |
+| `--model` | | `.env` 的 `IMAGE_MODEL` | qwen 引擎模型名称，默认为 `qwen-image-3.0` |
+| `--image` | `-i` | | qwen 引擎编辑输入图片，可重复指定，最多 3 张 |
+| `--negative-prompt` | | | qwen 引擎负向提示词 |
+| `--n` | | `1` | 生成张数（qwen: 1~6；gpt-image: 1~4） |
+| `--prompt-extend` | | `true` | qwen 引擎智能提示词改写 |
+| `--seed` | | 随机 | qwen 引擎随机种子（0~2147483647） |
+| `--watermark` | | `false` | qwen 引擎是否添加水印 |
+| `--resolution` | `-r` | `1k` | gpt-image 引擎分辨率档位：1k / 2k / 4k |
+| `--quality` | | `auto` | gpt-image 引擎图片质量：auto / low / medium / high |
+| `--enhance` | | `true` | gpt-image 引擎使用 LLM 丰富提示词 |
+| `--ref` | | | gpt-image 引擎参考图路径或 URL（可多次指定，最多16张） |
+| `--output-format` | | `png` | gpt-image 引擎输出格式：png / jpeg / webp |
+| `--output-compression` | | | gpt-image 引擎压缩强度 0-100（仅 jpeg/webp） |
+| `--moderation` | | `auto` | gpt-image 引擎审核强度：auto / low |
+| `--proxy` | | `false` | gpt-image 引擎代理开关（WSL 下默认启用） |
+| `--timeout` | | `600` | gpt-image 引擎最大等待时间（秒） |
 | `--no-download` | | `false` | 仅返回图片 URL |
-| `--proxy` | | `false` | WSL 下默认启用，此参数可手动开关 |
-| `--timeout` | | `600` | 最大等待时间（秒） |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
 ---
 
-## music-gen — 阿里云 Fun-Music / MiniMax Music
+## music generate — 阿里云 Fun-Music / MiniMax Music
 
-`opc music-gen` 支持两个音乐服务商：阿里云 Fun-Music，以及 MiniMax Music 3.0。默认使用阿里云；使用 `--provider minimax` 或设置 `MUSIC_GEN_PROVIDER=minimax` 切换到 MiniMax 的 `music-3.0-free`。
+`opc music generate` 支持两个音乐服务商：阿里云 Fun-Music，以及 MiniMax Music 3.0。默认使用阿里云；使用 `--provider minimax` 或设置 `MUSIC_GEN_PROVIDER=minimax` 切换到 MiniMax 的 `music-3.0-free`。
 
 阿里云根据音乐风格/场景提示词或自定义歌词生成完整歌曲，也可以生成纯音乐。`fun-music-v1` 支持男声/女声；`fun-music-preview` 需要提示词且不支持声音性别参数。MiniMax `music-3.0-free` 支持歌曲、纯音乐和 AI 歌词优化，默认限制为 3 RPM。
 
@@ -576,25 +602,25 @@ Fun-Music 使用 `ALIYUN_API_KEY`，MiniMax 使用 `MINIMAX_API_KEY`。MiniMax �
 
 ```bash
 # 阿里云 Fun-Music（默认）
-opc music-gen "夏日清新民谣，木吉他与口琴伴奏，适合旅行 Vlog" --gender female -o summer.mp3
+opc music generate "夏日清新民谣，木吉他与口琴伴奏，适合旅行 Vlog" --gender female -o summer.mp3
 
 # 从歌词文件生成歌曲
-opc music-gen --lyrics-file lyrics.txt --gender male -o song.wav --format wav
+opc music generate --lyrics-file lyrics.txt --gender male -o song.wav --format wav
 
 # 生成纯音乐
-opc music-gen "宁静的钢琴曲，适合深夜阅读的背景音乐" --instrumental -o reading.mp3
+opc music generate "宁静的钢琴曲，适合深夜阅读的背景音乐" --instrumental -o reading.mp3
 
 # MiniMax Music 3.0 Free：根据风格描述自动生成歌词
-opc music-gen --provider minimax "梦幻电子流行，明亮女声，适合夜晚城市漫步" -o minimax-song.mp3
+opc music generate --provider minimax "梦幻电子流行，明亮女声，适合夜晚城市漫步" -o minimax-song.mp3
 
 # MiniMax Music 3.0 Free：使用自定义歌词
-opc music-gen --provider minimax \
+opc music generate --provider minimax \
   --lyrics-file lyrics.txt \
   --model music-3.0-free \
   -o minimax-with-lyrics.mp3
 
 # MiniMax 纯音乐
-opc music-gen --provider minimax "电影感钢琴与弦乐，逐渐推进，温暖收束" \
+opc music generate --provider minimax "电影感钢琴与弦乐，逐渐推进，温暖收束" \
   --instrumental -o minimax-instrumental.mp3
 ```
 
@@ -615,63 +641,6 @@ opc music-gen --provider minimax "电影感钢琴与弦乐，逐渐推进，温�
 | `--env-file` | | | 自定义 `.env` 文件路径 |
 
 两个服务商的接口返回临时音频 URL，命令会自动下载到本地；如需保存歌词，请使用 `--lyrics` 或 `--lyrics-file` 保留输入内容。MiniMax `music-3.0-free` 的免费 API 速率限制为 3 RPM。
-
-## image — Qwen Image 3.0 文生图与图像编辑
-
-使用阿里云 DashScope 的 Qwen Image 3.0 模型进行文生图或图像编辑，提示词直接发送给 Qwen Image。可通过 `--prompt-extend` 控制 Qwen Image 自身的提示词改写。
-
-### 使用范例
-
-```bash
-# 基本文生图
-opc image "一只穿着宇航服的猫"
-
-# 指定输出路径
-opc image "山水画" -o ./output/landscape.png
-
-# 图像编辑：提供一张本地图片、公开 URL 或 data URI
-opc image "把天空改成绚丽的晚霞" --image ./input/landscape.png
-
-# 多图编辑/融合，最多 3 张参考图
-opc image "把图 1 的人物换成图 2 的服装" \
-  --image ./input/person.png \
-  --image ./input/clothes.png
-
-# 指定宽高比
-opc image "人像" -s 3:4
-opc image "横版风景" -s 16:9
-
-# 指定像素分辨率
-opc image "高清图" -s 2048*2048
-
-# 启用智能提示词改写（会增加时间和费用）
-opc image "风景" --prompt-extend
-
-# 指定随机种子（可复现结果）
-opc image "测试" --seed 42
-
-# 仅返回图片 URL
-opc image "测试图" --no-download
-```
-
-### 参数
-
-| 参数 | 简写 | 默认值 | 说明 |
-|---|---|---|---|
-| `prompt` | | | 文生图提示词或图像编辑指令（中英文） |
-| `--output` | `-o` | 自动生成 | 输出图片路径 |
-| `--size` | `-s` | `2:3` | 宽高比（如 2:3）或像素（如 1024*1536） |
-| `--model` | | `.env` 的 `IMAGE_MODEL` | 模型名称，默认为 `qwen-image-3.0` |
-| `--image` | `-i` | | 编辑输入图片，可重复指定，最多 3 张 |
-| `--negative-prompt` | | | 负向提示词 |
-| `--n` | | `1` | 生成张数（1~6） |
-| `--prompt-extend` | | `true` | 启用 Qwen Image 智能提示词改写 |
-| `--seed` | | 随机 | 随机种子（0~2147483647） |
-| `--watermark` | | `false` | 是否添加水印 |
-| `--no-download` | | `false` | 仅返回图片 URL |
-| `--env-file` | | | 自定义 .env 文件路径 |
-
----
 
 ---
 
@@ -853,7 +822,7 @@ opc aigate --release --instance INSTANCE_ID
 命令状态分为：
 
 - **可用**：命令的主要功能所需配置齐全。
-- **部分可用**：命令仍有部分模式可用，例如 `bili --audio-only`。
+- **部分可用**：命令仍有部分模式可用，例如 `media download`（仅下载，缺总结所需凭证）。
 - **不可用**：缺少该命令所需的 API Key 或 Token。
 
 检查只会显示正在使用的环境变量名，不会打印 API Key 内容。缺少凭证时会直接显示配置问题，不会因为配置读取函数退出而产生重复错误提示。
@@ -926,11 +895,12 @@ opc news --env-file /path/to/.env
 ```
 opc_cli/
 ├── __init__.py     # 包初始化
-├── cli.py          # CLI 入口（typer 子命令定义）
+├── cli.py          # CLI 入口（typer 模态组 + 动词子命令定义）
 ├── config.py       # 共享配置（环境变量、API Key）
 ├── logger.py       # 日志系统（TeeWriter 双输出）
-├── bili.py         # B站视频下载 + ASR 转写 + 内容总结
-├── audio.py        # Qwen3-Omni 音乐理解
+├── media.py        # 统一媒体下载：平台识别 + 下载/总结分发
+├── bili.py         # B站流水线（下载音频 + ASR 转写 + 内容总结）
+├── audio.py        # Qwen3-Omni 音乐理解 + librosa 鼓点检测
 ├── video.py        # Qwen3-VL 视频理解
 ├── tts.py          # GLM-TTS 语音合成 + 音色克隆
 ├── local_tts.py    # Qwen3-TTS 本地语音合成
@@ -952,7 +922,7 @@ opc_cli/
 - **python-dotenv** — .env 文件加载
 - **openai** — LLM 内容总结 / 图片理解
 - **zhipuai** — 智谱 ASR 语音识别
-- **yt-dlp** — B站视频下载
+- **yt-dlp** — 媒体下载（B站/抖音/X/网易云）
 - **soundfile** + **numpy** — 音频分片处理
 - **dashscope** — 阿里云 Qwen3-Omni 音乐理解 / ASR / TTS API
 - **librosa** — BPM、节拍和起音时刻检测
@@ -992,9 +962,9 @@ source ~/qwen3-tts-venv/bin/activate
 ~/qwen3-tts-venv/bin/pip install -e /mnt/d/github/OPC
 ```
 
-**Q: `read-img` 输出为空**
+**Q: `image understand` 输出为空**
 
 可能是 `--max-tokens` 不够，模型推理过程消耗了配额。尝试增大：
 ```bash
-opc read-img photo.jpg --max-tokens 4096
+opc image understand photo.jpg --max-tokens 4096
 ```

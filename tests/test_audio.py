@@ -106,7 +106,7 @@ class AudioUnderstandingTests(unittest.TestCase):
             audio_path = Path(temporary) / "song.mp3"
             audio_path.write_bytes(b"audio")
             with patch("opc_cli.cli.analyze_audio", return_value="音乐分析结果") as analyze:
-                result = runner.invoke(cli.app, ["audio", str(audio_path)])
+                result = runner.invoke(cli.app, ["music", "understand", str(audio_path)])
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("音乐分析结果", result.output)
@@ -132,8 +132,8 @@ class AudioUnderstandingTests(unittest.TestCase):
                 result = runner.invoke(
                     cli.app,
                     [
-                        "audio",
-                        "librosa",
+                        "music",
+                        "beats",
                         str(audio_path),
                         "--beat-strength-threshold",
                         "0.6",

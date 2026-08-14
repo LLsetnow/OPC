@@ -62,8 +62,8 @@ class XDownloadTests(unittest.TestCase):
                 os.environ,
                 {"X_FOLDER": str(output_dir), "YT_DLP_COOKIES": "cookies.txt"},
                 clear=False,
-            ), patch("opc_cli.cli.download_x_video", return_value=str(output_file)) as download:
-                result = runner.invoke(cli.app, ["x", "https://x.com/i/status/123"])
+            ), patch("opc_cli.media.download_x_video", return_value=str(output_file)) as download:
+                result = runner.invoke(cli.app, ["media", "download", "https://x.com/i/status/123"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn(str(output_file), result.output)

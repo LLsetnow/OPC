@@ -98,16 +98,6 @@ def get_command_availability() -> list[CommandAvailability]:
         tts_status = "不可用"
         tts_detail = "未配置 ALIYUN_API_KEY 或 ZHIPU_API_KEY"
 
-    gpt_status = "不可用" if not gpt_image_source else "可用" if deepseek_source else "部分可用"
-    gpt_detail = (
-        "Qwen Image 文生图/编辑和 DeepSeek 提示词增强均可用"
-        if gpt_image_source and deepseek_source
-        else "可使用 --no-enhance 文生图或编辑；缺少 DeepSeek 提示词增强"
-        if gpt_image_source
-        else "缺少 GPT_IMAGE_API_KEY"
-    )
-    image_status = "可用" if image_source else "不可用"
-    image_detail = "Qwen Image 文生图/编辑可用" if image_source else "缺少 ALIYUN_API_KEY"
     if audio_source and minimax_music_source:
         music_gen_detail = "阿里云 Fun-Music + MiniMax Music 均可用"
     elif audio_source:
@@ -117,67 +107,72 @@ def get_command_availability() -> list[CommandAvailability]:
     else:
         music_gen_detail = "缺少 ALIYUN_API_KEY 和 MINIMAX_API_KEY"
 
+    image_gen_status = "不可用"
+    if image_source and gpt_image_source:
+        image_gen_status = "可用"
+        image_gen_detail = "Qwen Image + GPT-Image 双引擎均可用"
+    elif image_source:
+        image_gen_status = "部分可用"
+        image_gen_detail = "仅 Qwen Image 引擎可用（--engine qwen）；缺少 GPT_IMAGE_API_KEY"
+    elif gpt_image_source:
+        image_gen_status = "部分可用"
+        image_gen_detail = "仅 GPT-Image 引擎可用（--engine gpt-image）；缺少 ALIYUN_API_KEY"
+    else:
+        image_gen_detail = "缺少 ALIYUN_API_KEY 和 GPT_IMAGE_API_KEY"
+
     return [
         CommandAvailability(
-            "bili",
+            "media download",
             "可用" if full_bili else "部分可用",
-            "ALIYUN + DEEPSEEK（完整流程）",
-            "完整下载→转写→总结流程可用"
-            if full_bili
-            else f"可用音频下载/导出；完整流程缺少 {', '.join(bili_missing)}",
-        ),
-        CommandAvailability("douyin", "可用", "无需 API Key", "视频下载可用"),
-        CommandAvailability("x", "可用", "无需 API Key", "视频下载可用"),
-        CommandAvailability("music", "可用", "无需 API Key", "音乐下载可用"),
-        CommandAvailability(
-            "asr",
-            "可用" if asr_source else "不可用",
-            "ALIYUN_API_KEY",
-            f"使用 {asr_source}" if asr_source else "缺少 ALIYUN_API_KEY",
+            "ALIYUN + DEEPSEEK（--summarize 总结）",
+            "下载可用；--summarize 内容总结缺少 " + "、".join(bili_missing)
+            if not full_bili
+            else "下载 + --summarize 内容总结均可用",
         ),
         CommandAvailability(
-            "audio",
+            "music understand",
             "可用" if audio_source else "不可用",
             "ALIYUN_API_KEY",
             f"使用 {audio_source}" if audio_source else "缺少 ALIYUN_API_KEY",
         ),
+        CommandAvailability("music beats", "可用", "无需 API Key", "librosa 本地鼓点检测可用"),
         CommandAvailability(
-            "video",
-            "可用" if video_source else "不可用",
-            "ALIYUN_API_KEY",
-            f"使用 {video_source}" if video_source else "缺少 ALIYUN_API_KEY",
+            "music generate",
+            "可用" if music_gen_source else "不可用",
+            "ALIYUN_API_KEY 或 MINIMAX_API_KEY",
+            music_gen_detail,
         ),
         CommandAvailability(
-            "tts",
-            tts_status,
-            "ALIYUN_API_KEY 或 ZHIPU_API_KEY",
-            tts_detail,
-        ),
-        CommandAvailability("local-tts", "可用", "无需 API Key", "使用本地 Qwen3-TTS 模型"),
-        CommandAvailability(
-            "read-img",
+            "image understand",
             "可用" if vision_source else "不可用",
             "ZHIPU_API_KEY",
             f"使用 {vision_source}" if vision_source else "缺少 ZHIPU_API_KEY",
         ),
         CommandAvailability(
-            "gpt-img",
-            gpt_status,
-            "GPT_IMAGE_API_KEY；DEEPSEEK_API_KEY 可选",
-            gpt_detail,
+            "image generate",
+            image_gen_status,
+            "ALIYUN_API_KEY 或 GPT_IMAGE_API_KEY",
+            image_gen_detail,
         ),
         CommandAvailability(
-            "image",
-            image_status,
+            "video understand",
+            "可用" if video_source else "不可用",
             "ALIYUN_API_KEY",
-            image_detail,
+            f"使用 {video_source}" if video_source else "缺少 ALIYUN_API_KEY",
         ),
         CommandAvailability(
-            "music-gen",
-            "可用" if music_gen_source else "不可用",
-            "ALIYUN_API_KEY 或 MINIMAX_API_KEY",
-            music_gen_detail,
+            "speech tts",
+            tts_status,
+            "ALIYUN_API_KEY 或 ZHIPU_API_KEY",
+            tts_detail,
         ),
+        CommandAvailability(
+            "speech asr",
+            "可用" if asr_source else "不可用",
+            "ALIYUN_API_KEY",
+            f"使用 {asr_source}" if asr_source else "缺少 ALIYUN_API_KEY",
+        ),
+        CommandAvailability("local-tts", "可用", "无需 API Key", "使用本地 Qwen3-TTS 模型"),
         CommandAvailability(
             "comfyui",
             "可用" if comfyui_source else "部分可用",
