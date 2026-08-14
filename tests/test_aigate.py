@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from opc_cli import aigate
 from opc_cli.scail import build_scail_workflow, unresolved_references
@@ -310,6 +310,241 @@ class AigateTests(unittest.TestCase):
         self.assertEqual(found["instance_id"], "running")
         self.assertEqual(found["base_url"], "https://comfy.example")
         self.assertEqual(detail.call_count, 1)
+
+    def test_make_comfyui_base_url_strips_query_and_accepts_port(self):
+        # 云扉会把 ?token=... 塞进 host（JupyterLab 那条就是）。
+        self.assertEqual(
+            aigate.make_comfyui_base_url("comfy.example?token=secret"),
+            "https://comfy.example",
+        )
+        self.assertEqual(
+            aigate.make_comfyui_base_url("comfy.example:8188"),
+            "https://comfy.example:8188",
+        )
+        self.assertEqual(
+            aigate.make_comfyui_base_url("https://comfy.example/"),
+            "https://comfy.example",
+        )
+        with self.assertRaises(aigate.AigateError):
+            aigate.make_comfyui_base_url("comfy.example/path")
+
+    def test_describe_instance_status_keeps_unknown_codes_visible(self):
+        self.assertEqual(aigate.describe_instance_status("2"), "运行中(2)")
+        self.assertEqual(aigate.describe_instance_status("22"), "停止中/网关不可用(22)")
+        self.assertEqual(aigate.describe_instance_status("99"), "未知状态(99)")
+        self.assertEqual(aigate.describe_instance_status(""), "未知")
+
+    @patch("opc_cli.aigate._select_comfyui_instance")
+    def test_discover_reports_actual_status_for_stopped_instance(self, select):
+        # 停机实例仍带着 host 返回，必须靠 operationStatus 判定而不是 host。
+        select.return_value = {
+            "instanceId": "gone",
+            "operationStatus": "22",
+            "instanceUtilList": [{"name": "ComfyUI", "host": "comfy.example"}],
+        }
+
+        with self.assertRaises(aigate.AigateError) as caught:
+            aigate.discover_running_comfyui("token", "gone")
+
+        self.assertIn("停止中/网关不可用(22)", str(caught.exception))
+
+    @patch("opc_cli.aigate.get_instance_detail")
+    @patch("opc_cli.aigate.list_instances")
+    def test_select_prefers_running_instance_over_stopped_one(self, listed, detail):
+        listed.return_value = [{"instanceId": "stopped"}, {"instanceId": "running"}]
+        detail.side_effect = [
+            {
+                "instanceId": "stopped",
+                "operationStatus": "22",
+                "instanceUtilList": [{"name": "ComfyUI", "host": "stopped.example"}],
+            },
+            {
+                "instanceId": "running",
+                "operationStatus": "2",
+                "instanceUtilList": [{"name": "ComfyUI", "host": "running.example"}],
+            },
+        ]
+
+        selected = aigate._select_comfyui_instance("token", None)
+
+        self.assertEqual(selected["instanceId"], "running")
+
+    @patch("opc_cli.aigate.probe_comfyui")
+    @patch("opc_cli.aigate.get_instance_detail")
+    def test_wait_skips_probe_until_running_and_reports_last_status(
+        self, detail, probe
+    ):
+        detail.return_value = {
+            "instanceId": "pending",
+            "operationStatus": "22",
+            "instanceUtilList": [{"name": "ComfyUI", "host": "comfy.example"}],
+        }
+
+        with self.assertRaises(aigate.AigateError) as caught:
+            aigate.wait_for_comfyui("token", "pending", timeout=1, poll_interval=1)
+
+        # 实例没跑起来时不该浪费探活请求，超时消息要带上最后已知状态。
+        probe.assert_not_called()
+        self.assertIn("停止中/网关不可用(22)", str(caught.exception))
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_wait_for_history_survives_transient_poll_failures(self, request):
+        request.side_effect = [
+            aigate.AigateError("云扉 ComfyUI 连接失败：连接被对端重置"),
+            aigate.AigateError("云扉 ComfyUI 请求失败（HTTP 502）"),
+            {"p1": {"status": {"completed": True}, "outputs": {"9": {"images": [{"filename": "a.png"}]}}}},
+        ]
+
+        with patch("opc_cli.aigate.time.sleep"):
+            task = aigate._wait_for_history("https://comfy.example", "p1", 600)
+
+        self.assertEqual(task["outputs"]["9"]["images"][0]["filename"], "a.png")
+        self.assertEqual(request.call_count, 3)
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_wait_for_history_gives_up_after_sustained_failure(self, request):
+        request.side_effect = aigate.AigateError("云扉 ComfyUI 连接失败：无法建立连接")
+        clock = iter([0.0] + [float(i) for i in range(0, 4000, 10)])
+
+        with patch("opc_cli.aigate.time.sleep"), patch(
+            "opc_cli.aigate.time.monotonic", lambda: next(clock)
+        ):
+            with self.assertRaises(aigate.AigateError) as caught:
+                aigate._wait_for_history("https://comfy.example", "p1", 3600)
+
+        self.assertIn("任务可能仍在云端运行", str(caught.exception))
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_wait_for_history_surfaces_execution_error_detail(self, request):
+        request.return_value = {
+            "p1": {
+                "status": {
+                    "status_str": "error",
+                    "completed": False,
+                    "messages": [
+                        [
+                            "execution_error",
+                            {
+                                "node_type": "WanSCAILToVideo",
+                                "exception_type": "torch.OutOfMemoryError",
+                                "exception_message": "CUDA out of memory",
+                            },
+                        ]
+                    ],
+                }
+            }
+        }
+
+        with patch("opc_cli.aigate.time.sleep"):
+            with self.assertRaises(aigate.AigateError) as caught:
+                aigate._wait_for_history("https://comfy.example", "p1", 60)
+
+        message = str(caught.exception)
+        self.assertIn("WanSCAILToVideo", message)
+        self.assertIn("CUDA out of memory", message)
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_wait_for_history_rejects_completed_run_without_outputs(self, request):
+        request.return_value = {"p1": {"status": {"completed": True}, "outputs": {}}}
+
+        with patch("opc_cli.aigate.time.sleep"):
+            with self.assertRaises(aigate.AigateError) as caught:
+                aigate._wait_for_history("https://comfy.example", "p1", 60)
+
+        self.assertIn("没有产生任何输出", str(caught.exception))
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_upload_retries_then_succeeds(self, request):
+        request.side_effect = [
+            aigate.AigateError("云扉 ComfyUI 连接失败：等待响应超时"),
+            {"name": "remote (1).png"},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            image = Path(temporary) / "input.png"
+            image.write_bytes(b"fake-image")
+            with patch("opc_cli.aigate.time.sleep"):
+                name = aigate._upload_input_file("https://comfy.example", image)
+
+        self.assertEqual(name, "remote (1).png")
+        self.assertEqual(request.call_count, 2)
+
+    def test_upload_timeout_scales_with_file_size(self):
+        # 原来固定 60s，250MB 的输入视频必然超时。
+        self.assertEqual(aigate._upload_timeout(0), (15, 120))
+        self.assertGreater(aigate._upload_timeout(250 * 1024 * 1024)[1], 300)
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_queue_position_reports_tasks_ahead(self, request):
+        request.return_value = {
+            "queue_running": [[0, "other-running", {}]],
+            "queue_pending": [[1, "ahead", {}], [2, "mine", {}]],
+        }
+
+        self.assertEqual(
+            aigate._queue_position("https://comfy.example", "mine"),
+            "排队中，前面还有 2 个任务",
+        )
+        self.assertEqual(
+            aigate._queue_position("https://comfy.example", "other-running"),
+            "正在执行",
+        )
+        self.assertEqual(aigate._queue_position("https://comfy.example", "gone"), "")
+
+    @patch("opc_cli.aigate._comfyui_json")
+    def test_queue_position_is_diagnostic_only(self, request):
+        # 队列查询失败不能影响主流程。
+        request.side_effect = aigate.AigateError("云扉 ComfyUI 连接失败：无法建立连接")
+        self.assertEqual(aigate._queue_position("https://comfy.example", "p1"), "")
+
+    @patch("opc_cli.aigate._send")
+    def test_download_rejects_oversize_before_writing(self, send):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.is_redirect = False
+        response.is_permanent_redirect = False
+        response.ok = True
+        response.headers = {"Content-Length": str(200 * 1024 * 1024)}
+        send.return_value = response
+
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            with self.assertRaises(aigate.AigateError) as caught:
+                aigate._download_output(
+                    "https://comfy.example",
+                    {"filename": "huge.mp4"},
+                    destination,
+                    max_download_mb=100,
+                )
+            # 超限必须在写盘之前拒绝，不留半个文件。
+            self.assertEqual(list(destination.iterdir()), [])
+
+        response.iter_content.assert_not_called()
+        self.assertIn("--max-download-mb", str(caught.exception))
+
+    @patch("opc_cli.aigate._send")
+    def test_download_streams_to_disk(self, send):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.is_redirect = False
+        response.is_permanent_redirect = False
+        response.ok = True
+        response.headers = {"Content-Length": "10"}
+        response.iter_content.return_value = [b"hello", b"world"]
+        send.return_value = response
+
+        with tempfile.TemporaryDirectory() as temporary:
+            saved = aigate._download_output(
+                "https://comfy.example", {"filename": "out.png"}, Path(temporary)
+            )
+            self.assertEqual(saved.read_bytes(), b"helloworld")
+
+    def test_safe_error_message_reads_apisix_gateway_field(self):
+        self.assertEqual(
+            aigate._safe_error_message({"error_msg": "404 Route Not Found"}),
+            "404 Route Not Found",
+        )
 
     @patch("opc_cli.aigate.wait_for_comfyui")
     @patch("opc_cli.aigate.control_instance")

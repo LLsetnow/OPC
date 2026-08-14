@@ -59,6 +59,8 @@ from .check_api import get_command_availability, run_check_api
 from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
 from .aigate import (
     AigateError,
+    DEFAULT_MAX_DOWNLOAD_MB as _AIGATE_DEFAULT_MAX_DOWNLOAD_MB,
+    configure_network as _aigate_configure_network,
     control_instance as _aigate_control_instance,
     create_instance as _aigate_create_instance,
     discover_running_comfyui as _aigate_discover_running_comfyui,
@@ -1465,6 +1467,8 @@ def aigate_cmd(
     workflows: bool = typer.Option(False, "--workflows", "--list-workflows", help="列出仓库中可提交的本地工作流（无需云扉 Token）"),
     workflow_dir: Optional[str] = typer.Option(None, "--workflow-dir", help="要列出的本地工作流目录（默认仓库的 workflows/）"),
     run: bool = typer.Option(False, "--run", help="向运行中的云扉 ComfyUI 提交工作流"),
+    no_proxy: bool = typer.Option(False, "--no-proxy", help="忽略 shell 的 HTTP(S)_PROXY / ALL_PROXY 直连云扉（也可设 AIGATE_NO_PROXY=1）"),
+    max_download_mb: int = typer.Option(_AIGATE_DEFAULT_MAX_DOWNLOAD_MB, "--max-download-mb", help="单个输出文件的下载大小上限（MB）"),
     token: Optional[str] = typer.Option(None, "--token", help="云扉 Bearer Token（默认读取 AIGATE_TOKEN）"),
     instance: Optional[str] = typer.Option(None, "--instance", help="云扉实例 ID；省略时自动选择第一个可用 ComfyUI 实例"),
     sku: Optional[str] = typer.Option(None, "--sku", help="创建实例使用的 GPU SKU（默认读取 AIGATE_SKU_NAME）"),
@@ -1513,6 +1517,8 @@ def aigate_cmd(
     """
     load_env(env_file)
     aigate_token = token or os.environ.get("AIGATE_TOKEN", "")
+    if no_proxy:
+        _aigate_configure_network(no_proxy=True)
 
     if create and not start:
         console.print("[red]错误: --create 必须与 --start 一起使用[/red]")
@@ -1708,6 +1714,8 @@ def aigate_cmd(
                 cfg=cfg,
                 denoise=denoise,
                 output_prefix=output_prefix,
+                max_download_mb=max_download_mb,
+                on_progress=lambda message: console.print(f"[dim]{message}[/dim]"),
             )
             console.print(f"\n[green]完成![/green] 共 {len(result_paths)} 个输出文件:")
             for path in result_paths:
@@ -1725,10 +1733,11 @@ def aigate_cmd(
             table.add_column("状态")
             for record in instances:
                 summary = _aigate_instance_summary(record)
+                colour = "green" if summary["running"] else "yellow"
                 table.add_row(
                     summary["instance_id"],
                     summary["instance_name"],
-                    summary["status"] or "未知",
+                    f"[{colour}]{summary['status_label']}[/{colour}]",
                 )
             console.print(table)
     except AigateError as e:
