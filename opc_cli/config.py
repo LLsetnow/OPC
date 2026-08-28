@@ -150,8 +150,8 @@ def get_video_config() -> tuple:
 def get_music_gen_config(provider: str = "") -> tuple:
     """获取音乐生成配置，返回 ``(api_key, base_url, model)``。
 
-    ``aliyun`` 保持原有 Fun-Music 配置；``minimax`` 使用 MiniMax Music
-    Generation API，并默认选择限免模型 ``music-3.0-free``。
+    ``aliyun`` 保持原有 Fun-Music 配置；``minimax`` 使用新版 MiniMax
+    Music Generation API，并默认选择 ``music-3.0``。
     """
     selected_provider = (provider or os.environ.get("MUSIC_GEN_PROVIDER", "aliyun")).strip().lower()
 
@@ -170,7 +170,7 @@ def get_music_gen_config(provider: str = "") -> tuple:
         base_url = os.environ.get("MINIMAX_MUSIC_BASE_URL", "").strip()
         base_url = base_url or "https://api.minimaxi.com"
         model = os.environ.get("MINIMAX_MUSIC_MODEL", "").strip()
-        model = model or "music-3.0-free"
+        model = model or "music-3.0"
         key_name = "MINIMAX_API_KEY"
     else:
         raise ValueError(

@@ -8,7 +8,7 @@ import requests
 
 MUSIC_GENERATION_PATH = "/services/audio/music/generation"
 SUPPORTED_MODELS = {"fun-music-v1", "fun-music-preview"}
-MINIMAX_SUPPORTED_MODELS = {"music-3.0", "music-3.0-free"}
+MINIMAX_SUPPORTED_MODELS = {"music-3.0", "music-2.6"}
 SUPPORTED_FORMATS = {"mp3", "wav"}
 SUPPORTED_GENDERS = {"female", "male"}
 SUPPORTED_PROVIDERS = {"aliyun", "minimax"}
@@ -151,10 +151,10 @@ def _generate_minimax_music(
     format: str,
     lyrics_optimizer: bool | None,
 ) -> dict:
-    """调用 MiniMax Music Generation API 并请求临时音频 URL。"""
+    """调用新版 MiniMax Music Generation API 并请求临时音频 URL。"""
     if model not in MINIMAX_SUPPORTED_MODELS:
         raise ValueError(
-            f"不支持的 MiniMax 音乐模型: {model}（支持 music-3.0/music-3.0-free）"
+            f"不支持的 MiniMax 音乐模型: {model}（支持 music-3.0/music-2.6）"
         )
 
     has_prompt = bool(prompt and prompt.strip())
@@ -170,7 +170,11 @@ def _generate_minimax_music(
 
     payload = {
         "model": model,
-        "audio_setting": {"format": format},
+        "audio_setting": {
+            "sample_rate": 44100,
+            "bitrate": 256000,
+            "format": format,
+        },
         "output_format": "url",
         "is_instrumental": is_instrumental,
     }
@@ -199,6 +203,12 @@ def _generate_minimax_music(
         response.raise_for_status()
     except requests.HTTPError as error:
         detail = response.text[:500]
+        if response.status_code == 410:
+            raise RuntimeError(
+                "MiniMax Music API 当前账号或模型不可用（HTTP 410）。"
+                "请确认使用 music-3.0 且账号具备付费/Token Plan 权限；"
+                f"原始响应: {detail}"
+            ) from error
         raise RuntimeError(
             f"MiniMax Music API 请求失败: HTTP {response.status_code} {detail}"
         ) from error

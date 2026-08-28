@@ -46,7 +46,7 @@ class MusicGenerationTests(unittest.TestCase):
     )
     @patch(
         "opc_cli.cli.get_music_gen_config",
-        return_value=("minimax-test-key", "https://api.minimaxi.com", "music-3.0-free"),
+        return_value=("minimax-test-key", "https://api.minimaxi.com", "music-3.0"),
     )
     @patch("opc_cli.cli.load_env")
     def test_cli_selects_minimax_provider(
@@ -82,7 +82,7 @@ class MusicGenerationTests(unittest.TestCase):
             prompt="梦幻电子流行，明亮女声，适合夜晚城市漫步",
             api_key="minimax-test-key",
             base_url="https://api.minimaxi.com",
-            model="music-3.0-free",
+            model="music-3.0",
             format="mp3",
         )
 
@@ -95,10 +95,14 @@ class MusicGenerationTests(unittest.TestCase):
             "Bearer minimax-test-key",
         )
         body = post.call_args.kwargs["json"]
-        self.assertEqual(body["model"], "music-3.0-free")
+        self.assertEqual(body["model"], "music-3.0")
         self.assertEqual(body["prompt"], "梦幻电子流行，明亮女声，适合夜晚城市漫步")
         self.assertTrue(body["lyrics_optimizer"])
         self.assertEqual(body["output_format"], "url")
+        self.assertEqual(
+            body["audio_setting"],
+            {"sample_rate": 44100, "bitrate": 256000, "format": "mp3"},
+        )
         self.assertTrue(body["is_instrumental"] is False)
         self.assertEqual(result["audio_url"], "https://example.com/minimax-song.mp3")
         self.assertEqual(result["duration"], 42)
@@ -114,7 +118,7 @@ class MusicGenerationTests(unittest.TestCase):
             is_instrumental=True,
             gender="male",
             api_key="minimax-test-key",
-            model="music-3.0-free",
+            model="music-3.0",
         )
 
         body = post.call_args.kwargs["json"]
@@ -131,7 +135,7 @@ class MusicGenerationTests(unittest.TestCase):
             prompt="短歌",
             api_key="minimax-test-key",
             base_url="https://api.minimaxi.com/v1",
-            model="music-3.0-free",
+            model="music-3.0",
         )
 
         self.assertEqual(
@@ -145,7 +149,7 @@ class MusicGenerationTests(unittest.TestCase):
                 provider="minimax",
                 prompt="x" * 2001,
                 api_key="minimax-test-key",
-                model="music-3.0-free",
+                model="music-3.0",
             )
 
         with self.assertRaisesRegex(ValueError, "lyrics 最多 3500"):
@@ -153,7 +157,7 @@ class MusicGenerationTests(unittest.TestCase):
                 provider="minimax",
                 lyrics="x" * 3501,
                 api_key="minimax-test-key",
-                model="music-3.0-free",
+                model="music-3.0",
             )
 
     @patch("opc_cli.music_gen.requests.post")

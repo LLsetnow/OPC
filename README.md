@@ -583,9 +583,9 @@ opc image generate "多种方案" --engine gpt-image --n 4 -o ./output/variants.
 
 ## music generate — 阿里云 Fun-Music / MiniMax Music
 
-`opc music generate` 支持两个音乐服务商：阿里云 Fun-Music，以及 MiniMax Music 3.0。默认使用阿里云；使用 `--provider minimax` 或设置 `MUSIC_GEN_PROVIDER=minimax` 切换到 MiniMax 的 `music-3.0-free`。
+`opc music generate` 支持两个音乐服务商：阿里云 Fun-Music，以及新版 MiniMax Music 3.0。默认使用阿里云；使用 `--provider minimax` 或设置 `MUSIC_GEN_PROVIDER=minimax` 切换到 MiniMax 的 `music-3.0`。
 
-阿里云根据音乐风格/场景提示词或自定义歌词生成完整歌曲，也可以生成纯音乐。`fun-music-v1` 支持男声/女声；`fun-music-preview` 需要提示词且不支持声音性别参数。MiniMax `music-3.0-free` 支持歌曲、纯音乐和 AI 歌词优化，默认限制为 3 RPM。
+阿里云根据音乐风格/场景提示词或自定义歌词生成完整歌曲，也可以生成纯音乐。`fun-music-v1` 支持男声/女声；`fun-music-preview` 需要提示词且不支持声音性别参数。MiniMax 使用 `POST /v1/music_generation`，请求包含 `model=music-3.0`、`audio_setting.sample_rate`、`audio_setting.bitrate`、`audio_setting.format` 和 `output_format=url`；音频 URL 需要在 24 小时内下载。根据 MiniMax 官方公告，`music-3.0-free` 等免费音乐 API 已停止服务，`music-3.0` 仅面向历史付费/Token Plan 用户。
 
 Fun-Music 使用 `ALIYUN_API_KEY`，MiniMax 使用 `MINIMAX_API_KEY`。MiniMax 中国区默认 API 地址为 `https://api.minimaxi.com`，国际区可配置为 `https://api.minimax.io`。
 
@@ -601,13 +601,13 @@ opc music generate --lyrics-file lyrics.txt --gender male -o song.wav --format w
 # 生成纯音乐
 opc music generate "宁静的钢琴曲，适合深夜阅读的背景音乐" --instrumental -o reading.mp3
 
-# MiniMax Music 3.0 Free：根据风格描述自动生成歌词
+# MiniMax Music 3.0：根据风格描述自动生成歌词
 opc music generate --provider minimax "梦幻电子流行，明亮女声，适合夜晚城市漫步" -o minimax-song.mp3
 
-# MiniMax Music 3.0 Free：使用自定义歌词
+# MiniMax Music 3.0：使用自定义歌词
 opc music generate --provider minimax \
   --lyrics-file lyrics.txt \
-  --model music-3.0-free \
+  --model music-3.0 \
   -o minimax-with-lyrics.mp3
 
 # MiniMax 纯音乐
@@ -625,13 +625,13 @@ opc music generate --provider minimax "电影感钢琴与弦乐，逐渐推进�
 | `--provider` | | `.env` 的 `MUSIC_GEN_PROVIDER` 或 `aliyun` | `aliyun` / `minimax` |
 | `--gender` | | `female` | `female` / `male`，仅阿里云 `fun-music-v1` 的歌曲模式生效 |
 | `--instrumental` | | `false` | 生成纯音乐，忽略歌词和声音性别 |
-| `--model` | | 由服务商配置决定 | 阿里云：`fun-music-v1` / `fun-music-preview`；MiniMax：`music-3.0` / `music-3.0-free` |
+| `--model` | | 由服务商配置决定 | 阿里云：`fun-music-v1` / `fun-music-preview`；MiniMax：`music-3.0` / `music-2.6` |
 | `--lyrics-optimizer` | | MiniMax 无歌词时自动启用 | 根据 prompt 自动生成歌词；可用 `--no-lyrics-optimizer` 关闭 |
 | `--format` | | `mp3` | 输出格式：`mp3` / `wav` |
 | `--output` | `-o` | 自动生成 | 输出音频路径 |
 | `--env-file` | | | 自定义 `.env` 文件路径 |
 
-两个服务商的接口返回临时音频 URL，命令会自动下载到本地；如需保存歌词，请使用 `--lyrics` 或 `--lyrics-file` 保留输入内容。MiniMax `music-3.0-free` 的免费 API 速率限制为 3 RPM。
+两个服务商的接口返回临时音频 URL，命令会自动下载到本地；如需保存歌词，请使用 `--lyrics` 或 `--lyrics-file` 保留输入内容。MiniMax 的 URL 有效期为 24 小时，命令会立即下载。
 
 ---
 
