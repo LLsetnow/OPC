@@ -1,6 +1,6 @@
 # OPC CLI
 
-OPC 工具集命令行界面 —— 命令采用「模态 + 动词」两级结构：`opc <模态> <动词> [参数]`。覆盖媒体下载/总结、音乐理解/生成、图片理解/生成、视频理解、语音合成/识别、本地TTS、本地/云扉 ComfyUI、AI日报。
+OPC 工具集命令行界面 —— 命令采用「模态 + 动词」两级结构：`opc <模态> <动词> [参数]`。覆盖媒体下载/总结、音乐理解/生成、图片理解/生成、视频理解/生成、语音合成/识别、本地TTS、本地/云扉 ComfyUI、AI日报。
 
 ## 安装
 
@@ -37,6 +37,7 @@ opc music generate <描述>       音乐生成：使用阿里云 Fun-Music / Min
 opc image understand <图片>     图片理解：使用视觉模型分析图片内容
 opc image generate <描述>       文生图/图生图/图像编辑（--engine qwen | gpt-image）
 opc video understand <视频>     视频理解：使用 Qwen3-VL 分析视频和镜头运动
+opc video generate <描述>       视频生成：使用 MiniMax H3 生成并下载 MP4
 opc speech tts <文本>           文字转语音（CosyVoice / GLM-TTS，支持音色克隆）
 opc speech asr <音频>           语音识别：音频 → SRT/JSON 字幕
 opc local-tts                   本地语音合成 + 服务管理（Qwen3-TTS）
@@ -58,6 +59,7 @@ opc news                        AI 日报：自动收集 AI 新闻并生成简�
 | `VIDEO_BASE_URL` / `VIDEO_MODEL` | Qwen3-VL 视频理解的 OpenAI 兼容接口和模型 | video understand |
 | `MUSIC_GEN_PROVIDER` / `MUSIC_GEN_MODEL` / `MUSIC_GEN_WORKSPACE_ID` / `MUSIC_GEN_BASE_URL` | 阿里云 Fun-Music 音乐生成配置 | music generate --provider aliyun |
 | `MINIMAX_API_KEY` / `MINIMAX_MUSIC_MODEL` / `MINIMAX_MUSIC_BASE_URL` | MiniMax Music 音乐生成配置 | music generate --provider minimax |
+| `MINIMAX_API_KEY` / `MINIMAX_VIDEO_MODEL` / `MINIMAX_VIDEO_BASE_URL` | MiniMax H3 视频生成配置 | video generate |
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | image generate --engine gpt-image |
 | `GPT_IMG_PROXY` | gpt-image 代理，WSL 下自动启用 | image generate --engine gpt-image (--proxy) |
 | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | media download |
@@ -450,6 +452,50 @@ opc video understand "https://example.com/video.mp4"
 | `--env-file` | | | 自定义 `.env` 文件路径 |
 
 本地视频会编码为 `data:` URI 后发送；X/Bilibili 帖子页面 URL 不是直接视频 URL，需要先下载视频（`opc media download <URL>`）再调用此命令。
+
+---
+
+## video generate — MiniMax H3 视频生成
+
+使用 MiniMax H3 当前 v2 异步接口生成视频：命令先创建任务，再轮询任务状态，成功后自动把结果下载为 MP4。API Key 使用 `.env` 中的 `MINIMAX_API_KEY`，默认中国区地址为 `https://api.minimaxi.com`，默认模型为 `MiniMax-H3`。
+
+### 使用范例
+
+```bash
+# 文生视频
+opc video generate "一只橘猫在雨夜街头撑伞慢慢走过，电影感，环境声自然" \
+  --duration 5 --resolution 2K --ratio 16:9 -o output/cat.mp4
+
+# 首帧生视频；画面比例由首帧图片决定，无需传 --ratio
+opc video generate "让首帧中的人物自然转身并走向远处" \
+  --first-frame "https://example.com/first.png" -o output/first-frame.mp4
+
+# 首尾帧与多模态参考素材（各参数可重复指定）
+opc video generate "保持人物和场景一致，平滑完成镜头过渡" \
+  --first-frame "https://example.com/first.png" \
+  --last-frame "https://example.com/last.png" \
+  --reference-audio "https://example.com/voice.wav" \
+  -o output/transition.mp4
+```
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `prompt` | | 英文或中文视频提示词，最多 7000 字符 |
+| `--duration` | `5` | 视频时长，4–15 秒整数 |
+| `--resolution` | `2K` | `768P` 或 `2K` |
+| `--ratio` | `16:9` | 仅文生视频使用；可选 `1:1`、`16:9`、`4:3`、`3:2`、`2:3`、`3:4`、`9:16`、`21:9`；带素材时由输入决定 |
+| `--first-frame` / `--last-frame` | | 首帧/尾帧图片公网 URL 或 data URI |
+| `--reference-image` | | 参考图片 URL，可重复指定，最多 9 张（含首尾帧） |
+| `--reference-video` | | 参考视频 URL，可重复指定，最多 3 个 |
+| `--reference-audio` | | 参考音频 URL，可重复指定，最多 3 个 |
+| `--model` | `.env` 的 `MINIMAX_VIDEO_MODEL` | 默认 `MiniMax-H3` |
+| `--output` / `-o` | `output/minimax_h3_<时间戳>.mp4` | 输出视频路径 |
+| `--timeout` | `900` | 最长等待任务时间（秒） |
+| `--poll-interval` | `10` | 任务轮询间隔（秒） |
+
+MiniMax H3 视频生成按输出时长计费；提交真实任务前请确认 API Key 和费用配置。图片、视频和音频参考素材需要 MiniMax 服务端可访问的公网 URL 或 data URI，本地路径不会自动上传。
 
 ---
 
@@ -893,6 +939,7 @@ opc_cli/
 ├── bili.py         # B站流水线（下载音频 + ASR 转写 + 内容总结）
 ├── audio.py        # Qwen3-Omni 音乐理解 + librosa 鼓点检测
 ├── video.py        # Qwen3-VL 视频理解
+├── minimax_video.py # MiniMax H3 视频生成（v2 异步接口）
 ├── tts.py          # GLM-TTS 语音合成 + 音色克隆
 ├── local_tts.py    # Qwen3-TTS 本地语音合成
 ├── tts_server.py   # TTS 常驻服务（Flask）

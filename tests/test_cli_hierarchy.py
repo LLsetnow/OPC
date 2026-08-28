@@ -44,6 +44,12 @@ class CliHierarchyTests(unittest.TestCase):
         for verb in ("understand", "beats", "generate"):
             self.assertIn(verb, result.output)
 
+    def test_video_group_lists_verbs(self):
+        result = CliRunner().invoke(cli.app, ["video", "--help"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        for verb in ("understand", "generate"):
+            self.assertIn(verb, result.output)
+
 
 class EngineDispatchTests(unittest.TestCase):
     def test_speech_tts_rejects_unknown_engine(self):

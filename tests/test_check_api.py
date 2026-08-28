@@ -32,6 +32,7 @@ class CheckApiTests(unittest.TestCase):
         self.assertEqual(availability["speech tts"].status, "不可用")
         self.assertEqual(availability["local-tts"].status, "可用")
         self.assertEqual(availability["music beats"].status, "可用")
+        self.assertEqual(availability["video generate"].status, "不可用")
         self.assertEqual(availability["media download"].status, "部分可用")
 
     def test_provider_keys_enable_the_expected_commands(self):
@@ -54,6 +55,7 @@ class CheckApiTests(unittest.TestCase):
         self.assertEqual(availability["aigate"].status, "可用")
         self.assertEqual(availability["music understand"].status, "可用")
         self.assertEqual(availability["music generate"].status, "可用")
+        self.assertEqual(availability["video generate"].status, "不可用")
 
     def test_minimax_key_alone_enables_music_generation(self):
         with patch.dict(
@@ -67,6 +69,8 @@ class CheckApiTests(unittest.TestCase):
 
         self.assertEqual(availability["music generate"].status, "可用")
         self.assertIn("MiniMax Music", availability["music generate"].detail)
+        self.assertEqual(availability["video generate"].status, "可用")
+        self.assertIn("MiniMax H3", availability["video generate"].detail)
 
     def test_check_map_includes_all_dashscope_audio_checks(self):
         self.assertIn("deepseek", CHECK_MAP)

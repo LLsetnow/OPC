@@ -76,6 +76,7 @@ def get_command_availability() -> list[CommandAvailability]:
     audio_source = _key_source("ALIYUN_API_KEY")
     video_source = _key_source("ALIYUN_API_KEY")
     minimax_music_source = _key_source("MINIMAX_API_KEY")
+    minimax_video_source = _key_source("MINIMAX_API_KEY")
     music_gen_source = _key_source("ALIYUN_API_KEY", "MINIMAX_API_KEY")
     codex_available_ = _codex_available()
     aigate_source = _key_source("AIGATE_TOKEN")
@@ -160,6 +161,14 @@ def get_command_availability() -> list[CommandAvailability]:
             "可用" if video_source else "不可用",
             "ALIYUN_API_KEY",
             f"使用 {video_source}" if video_source else "缺少 ALIYUN_API_KEY",
+        ),
+        CommandAvailability(
+            "video generate",
+            "可用" if minimax_video_source else "不可用",
+            "MINIMAX_API_KEY",
+            f"使用 {minimax_video_source}（MiniMax H3）"
+            if minimax_video_source
+            else "缺少 MINIMAX_API_KEY",
         ),
         CommandAvailability(
             "speech tts",

@@ -147,6 +147,22 @@ def get_video_config() -> tuple:
     return api_key, base_url.rstrip("/"), model
 
 
+def get_minimax_video_config() -> tuple:
+    """获取 MiniMax H3 视频生成配置，返回 (api_key, base_url, model)。"""
+    api_key = os.environ.get("MINIMAX_API_KEY", "")
+    base_url = os.environ.get("MINIMAX_VIDEO_BASE_URL", "").strip()
+    base_url = base_url or "https://api.minimaxi.com"
+    model = os.environ.get("MINIMAX_VIDEO_MODEL", "").strip()
+    model = model or "MiniMax-H3"
+
+    if not api_key:
+        print("错误: 未设置 MINIMAX_API_KEY 环境变量")
+        print("请在 .env 文件中添加: MINIMAX_API_KEY=your_api_key")
+        sys.exit(1)
+
+    return api_key, base_url.rstrip("/"), model
+
+
 def get_music_gen_config(provider: str = "") -> tuple:
     """获取音乐生成配置，返回 ``(api_key, base_url, model)``。
 

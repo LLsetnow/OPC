@@ -1,4 +1,4 @@
-"""OPC CLI 入口：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解 + 语音合成/识别。
+"""OPC CLI 入口：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解/生成 + 语音合成/识别。
 
 命令层级：第一级 = 模态（media/music/image/video/speech），第二级 = 动词（download/generate/understand/beats/tts/asr）。
 local-tts / news / check-api / comfyui / aigate 保持一级命令。
@@ -21,7 +21,15 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_comfyui_config, get_music_gen_config, get_news_folder
+from .config import (
+    get_api_config,
+    get_minimax_video_config,
+    load_env,
+    get_image_config,
+    get_comfyui_config,
+    get_music_gen_config,
+    get_news_folder,
+)
 from .bili import asr_transcribe, generate_srt, resegment_asr
 from .audio import (
     AudioUnderstandingError,
@@ -54,6 +62,7 @@ from .tts_server import (
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .vision import understand_image
 from .video import VideoUnderstandingError, understand_video
+from .minimax_video import MiniMaxVideoError, generate_video
 from .ai_daily import run_ai_daily
 from .check_api import get_command_availability, run_check_api
 from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
@@ -92,7 +101,7 @@ console = Console()
 media_app = typer.Typer(help="媒体下载/总结（B站/抖音/X/网易云，URL 自动识别平台）", no_args_is_help=True)
 music_app = typer.Typer(help="音乐：理解 / 鼓点检测 / 生成", no_args_is_help=True)
 image_app = typer.Typer(help="图片：理解 / 生成（文生图、图生图、编辑）", no_args_is_help=True)
-video_app = typer.Typer(help="视频：理解", no_args_is_help=True)
+video_app = typer.Typer(help="视频：理解 / 生成", no_args_is_help=True)
 speech_app = typer.Typer(help="语音：合成（TTS）/ 识别（ASR）", no_args_is_help=True)
 
 app.add_typer(media_app, name="media")
@@ -653,6 +662,78 @@ def video_understand(
         console.print("\n" + "=" * 50)
         console.print(result)
         console.print("=" * 50)
+
+
+@video_app.command("generate")
+def video_generate(
+    prompt: str = typer.Argument(help="视频生成提示词"),
+    duration: int = typer.Option(5, "--duration", help="视频时长（4-15 秒）"),
+    resolution: str = typer.Option("2K", "--resolution", help="输出分辨率：768P 或 2K"),
+    ratio: str = typer.Option("16:9", "--ratio", help="文生视频画面比例；带参考素材时由输入素材决定"),
+    first_frame: Optional[str] = typer.Option(None, "--first-frame", help="首帧图片公网 URL 或 data URI"),
+    last_frame: Optional[str] = typer.Option(None, "--last-frame", help="尾帧图片公网 URL 或 data URI"),
+    reference_image: Optional[list[str]] = typer.Option(
+        None, "--reference-image", help="参考图片 URL，可重复指定"
+    ),
+    reference_video: Optional[list[str]] = typer.Option(
+        None, "--reference-video", help="参考视频 URL，可重复指定"
+    ),
+    reference_audio: Optional[list[str]] = typer.Option(
+        None, "--reference-audio", help="参考音频 URL，可重复指定"
+    ),
+    model: str = typer.Option("", "--model", help="MiniMax 模型（默认 .env 的 MINIMAX_VIDEO_MODEL 或 MiniMax-H3）"),
+    output: Optional[str] = typer.Option(
+        None, "-o", "--output", help="输出 MP4 路径（默认 output/minimax_h3_<时间戳>.mp4）"
+    ),
+    timeout: int = typer.Option(900, "--timeout", help="最长等待任务时间（秒）"),
+    poll_interval: int = typer.Option(10, "--poll-interval", help="任务轮询间隔（秒）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """调用 MiniMax H3 生成视频并自动下载结果。
+
+    示例:
+
+        opc video generate "一只橘猫在雨夜街头撑伞慢慢走过，电影感，环境声自然" \
+            --duration 5 --resolution 2K --ratio 16:9 -o output/cat.mp4
+        opc video generate "让首帧中的人物自然转身并走向远处" \
+            --first-frame https://example.com/first.png
+    """
+    load_env(env_file)
+    if output is None:
+        output = str(Path("output") / f"minimax_h3_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+
+    try:
+        api_key, base_url, configured_model = get_minimax_video_config()
+        result = generate_video(
+            prompt=prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=model or configured_model,
+            duration=duration,
+            resolution=resolution,
+            ratio=ratio,
+            first_frame=first_frame,
+            last_frame=last_frame,
+            reference_images=reference_image,
+            reference_videos=reference_video,
+            reference_audios=reference_audio,
+            output=output,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+    except (MiniMaxVideoError, OSError, ValueError) as error:
+        console.print(f"[red]视频生成失败: {error}[/red]")
+        raise typer.Exit(1)
+
+    output_path = Path(result["output"])
+    size_kb = output_path.stat().st_size / 1024
+    console.print(
+        f"[green]MiniMax H3 视频生成成功![/green] task_id={result['task_id']} "
+        f"已保存: {output_path} ({size_kb:.0f} KB)"
+    )
+    console.print(
+        f"参数: {result['duration']} 秒 | {result['resolution']} | {result['ratio']}"
+    )
 
 
 # ── speech 模态 ────────────────────────────────────────────────
