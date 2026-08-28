@@ -139,7 +139,7 @@ class CheckApiTests(unittest.TestCase):
         )
         self.assertEqual(model, "fun-music-v1")
 
-    def test_music_gen_uses_minimax_free_defaults(self):
+    def test_music_gen_uses_minimax_new_api_defaults(self):
         with patch.dict(
             os.environ,
             {"MINIMAX_API_KEY": "minimax-test-key"},
@@ -149,7 +149,7 @@ class CheckApiTests(unittest.TestCase):
 
         self.assertEqual(key, "minimax-test-key")
         self.assertEqual(base_url, "https://api.minimaxi.com")
-        self.assertEqual(model, "music-3.0-free")
+        self.assertEqual(model, "music-3.0")
 
     def test_music_gen_provider_environment_selects_minimax(self):
         with patch.dict(
@@ -164,7 +164,7 @@ class CheckApiTests(unittest.TestCase):
 
         self.assertEqual(key, "minimax-test-key")
         self.assertEqual(base_url, "https://api.minimaxi.com")
-        self.assertEqual(model, "music-3.0-free")
+        self.assertEqual(model, "music-3.0")
 
     def test_default_tts_does_not_require_zhipu_key(self):
         runner = CliRunner()

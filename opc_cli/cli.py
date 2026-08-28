@@ -251,7 +251,7 @@ def music_generate(
     output: Optional[str] = typer.Option(None, "-o", "--output", help="输出音频路径（默认 output/music_gen_<时间戳>.<格式>）"),
     env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
 ):
-    """音乐生成：使用阿里云 Fun-Music 或 MiniMax Music 生成歌曲/纯音乐。
+    """音乐生成：使用阿里云 Fun-Music 或新版 MiniMax Music 生成歌曲/纯音乐。
 
     示例:
 
