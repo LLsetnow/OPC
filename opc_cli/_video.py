@@ -130,6 +130,7 @@ def download_video(
     output_dir: str,
     cookies: str | None,
     *,
+    video_only: bool = False,
     source_label: str,
     error_cls: type[Exception],
     failure_hint: str = "",
@@ -138,6 +139,7 @@ def download_video(
 
     ``source_label`` 仅用于日志（如「抖音」「X」）；``error_cls`` 是平台专属的
     异常类型；``failure_hint`` 会在下载失败时追加到错误信息（如 X 的登录提示）。
+    ``video_only`` 为 True 时仅下载无音轨的视频流。
     """
     ensure_ytdlp(error_cls)
 
@@ -145,12 +147,17 @@ def download_video(
     destination.mkdir(parents=True, exist_ok=True)
     output_template = str(destination / "%(title)s.%(ext)s")
 
+    format_selector = (
+        "bv[acodec=none][ext=mp4]/bv[acodec=none]"
+        if video_only
+        else "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b"
+    )
     command = [
         "yt-dlp",
         "--no-playlist",
         # 优先选择原生 MP4 + M4A，其他可用组合则交由 ffmpeg 封装为 MP4。
         "-f",
-        "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b",
+        format_selector,
         "--merge-output-format",
         "mp4",
         "--remux-video",

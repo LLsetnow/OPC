@@ -82,6 +82,12 @@ opc news                        AI 日报：自动收集 AI 新闻并生成简�
 # 完整流程：下载 → ASR → 总结（B站/抖音/X 通用）
 opc media download "https://www.bilibili.com/video/BV1xx" --summarize
 
+# 下载 B站视频（默认 MP4，含音轨）
+opc media download "https://www.bilibili.com/video/BV1xx"
+
+# 仅下载 B站视频流（无音轨）
+opc media download "https://www.bilibili.com/video/BV1xx" --video-only
+
 # 指定输出目录
 opc media download "https://..." -o ./my_output --summarize
 
@@ -131,6 +137,7 @@ opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 
 | `--output-dir` | `-o` | 按平台读 `BILI_FOLDER`/`DOUYIN_FOLDER`/`X_FOLDER`/`MUSIC_FOLDER` 或 `./output` | 输出目录 |
 | `--cookies` | | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 |
 | `--audio-only` | | `false` | 仅下载音频并转为 MP3（仅 bilibili 生效） |
+| `--video-only` | | `false` | 仅下载无音轨的视频并输出 MP4（仅 bilibili 生效；不能与 `--audio-only` 或 `--summarize` 同用） |
 | `--bitrate` | | `192` | MP3 比特率（`--audio-only` 或网易云时生效） |
 | `--no-metadata` | | `false` | 跳过 MP3 的 ID3 元数据写入 |
 | `--playlist` | | `false` | 下载全部曲目（网易云专辑/歌单/歌手链接默认已启用） |
@@ -142,11 +149,12 @@ opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 
 | `--llm-fix` | | `false` | 使用 LLM 修复 ASR 断词和标点错误 |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
-### 输出文件（--summarize 模式）
+### 输出文件
 
 | 文件 | 说明 |
 |---|---|
-| `{title}.m4a` | 下载的音频文件 |
+| `{title}.mp4` | B站下载的视频；默认含音轨，使用 `--video-only` 时不含音轨 |
+| `{title}.m4a` | `--summarize` 模式下载并用于转写的音频文件 |
 | `{title}.mp3` | `--audio-only` 模式生成的 MP3（默认含标题、UP主和封面） |
 | `{title}.srt` | SRT 字幕文件 |
 | `{title}.asr.json` | ASR 原始结果（JSON） |

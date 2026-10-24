@@ -6,9 +6,9 @@
 
 | 需求场景 | 命令 | 说明 |
 |---|---|---|
-| 媒体下载/总结（多平台） | `opc media download "URL" [--summarize]` | URL 自动识别 B站/抖音/X/网易云；--summarize 下载音频→ASR转写→内容总结 |
+| 媒体下载/总结（多平台） | `opc media download "URL" [--summarize]` | URL 自动识别平台；B站默认下载含音轨 MP4，--summarize 下载音频→ASR转写→内容总结 |
+| B站仅下载视频流 | `opc media download "URL" --video-only` | 下载无音轨 MP4 |
 | B站视频下载MP3音频 | `opc media download "URL" --audio-only` | 下载音频 → 转为MP3（含ID3元数据） |
-| 仅下载B站音频 | `opc media download "URL"` | 下载音频文件（不转换） |
 | 跳过下载直接转写 | `opc media download "URL" --summarize --skip-download` | 从output目录查找已有音频 |
 | 跳过下载和ASR直接总结 | `opc media download "URL" --summarize --skip-download --skip-asr` | 从output目录查找已有字幕 |
 | 抖音/X 视频下载 | `opc media download "URL"` | 下载为 MP4 |
@@ -189,6 +189,9 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 
 # B站视频下载MP3
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx' --audio-only"
+
+# B站默认下载含音轨 MP4；仅下载视频流可加 --video-only
+wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx'"
 
 # B站视频完整流程（下载→ASR→总结，多平台通用）
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx' --summarize"
