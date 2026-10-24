@@ -8,9 +8,27 @@ import sys
 from pathlib import Path
 
 from .config import get_llm_config, get_asr_config
+from ._video import download_video as _download_video
 
 
-# ── Step 1: 下载 Bilibili 音频 ────────────────────────────────────
+# ── Bilibili 媒体下载 ─────────────────────────────────────────────
+
+def download_bilibili_video(
+    url: str,
+    output_dir: str,
+    cookies: str = None,
+    video_only: bool = False,
+) -> str:
+    """下载 B站 MP4；默认保留音轨，``video_only`` 时仅下载视频流。"""
+    return _download_video(
+        url,
+        output_dir,
+        cookies,
+        video_only=video_only,
+        source_label="B站",
+        error_cls=RuntimeError,
+    )
+
 
 def download_audio(url: str, output_dir: str, cookies: str = None, with_info: bool = False):
     """使用 yt-dlp 从 Bilibili 下载音频。

@@ -110,6 +110,11 @@ def media_download(
     output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认按平台从 .env 读取 BILI_FOLDER/DOUYIN_FOLDER/X_FOLDER/MUSIC_FOLDER，或 ./output）"),
     cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
     audio_only: bool = typer.Option(False, "--audio-only", help="仅下载音频并转为 MP3（仅 bilibili 生效）"),
+    video_only: bool = typer.Option(
+        False,
+        "--video-only",
+        help="仅下载无音轨的视频（仅 bilibili 生效）",
+    ),
     bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps，--audio-only 或网易云时生效)"),
     no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 MP3 的 ID3 元数据写入"),
     playlist: bool = typer.Option(False, "--playlist", help="下载全部曲目（网易云专辑/歌单/歌手链接默认已启用）"),
@@ -127,7 +132,9 @@ def media_download(
 
         opc media download "https://www.douyin.com/video/xxx"   # 抖音 MP4
         opc media download "https://music.163.com/song?id=xxx"  # 网易云 MP3
-        opc media download "https://www.bilibili.com/video/BV1xx"  # B站音频
+        opc media download "https://www.bilibili.com/video/BV1xx"  # B站 MP4（含音轨）
+        opc media download "https://www.bilibili.com/video/BV1xx" --video-only  # 仅下载视频流
+        opc media download "https://www.bilibili.com/video/BV1xx" --audio-only  # 仅下载音频并转 MP3
 
     B站完整流水线（下载 → ASR 转写 → 内容总结，多平台通用）:
 
@@ -145,6 +152,7 @@ def media_download(
             output_dir=output_dir or "",
             cookies=cookies,
             audio_only=audio_only,
+            video_only=video_only,
             bitrate=bitrate,
             no_metadata=no_metadata,
             playlist=playlist,

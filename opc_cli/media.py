@@ -1,7 +1,7 @@
 """统一媒体下载：bilibili / 抖音 / X / 网易云 平台自动识别与下载分发。
 
 `opc media download <URL>` 通过 URL 域名自动识别平台，统一入口：
-- bilibili：默认下载音频；--audio-only 转 MP3（含 ID3）；--summarize 走下载→ASR→总结
+- bilibili：默认下载含音轨的 MP4；--video-only 仅下载视频；--audio-only 转 MP3；--summarize 走下载→ASR→总结
 - douyin / x：默认下载 MP4；--summarize 走下载音频→ASR→总结
 - netease（网易云）：下载单曲/专辑/歌单 → MP3（含 ID3）
 """
@@ -61,12 +61,14 @@ def download_media(
     skip_asr: bool = False,
     asr_file: str = None,
     llm_fix: bool = False,
+    video_only: bool = False,
 ):
     """统一媒体下载入口，按 URL 平台分发。
 
     参数语义与原有命令保持一致：
     - ``--summarize`` 启用 下载音频 → ASR → LLM 总结 流水线（bilibili/douyin/x 通用）
     - ``--audio-only`` 仅对 bilibili 生效：下载并转 MP3（含 ID3 元数据）
+    - ``--video-only`` 仅对 bilibili 生效：仅下载无音轨的 MP4 视频
     - ``--bitrate/--no-metadata`` 影响 MP3 输出（bilibili --audio-only 与 netease）
     - ``--playlist`` 仅 netease（网易云）歌单下载生效
     - ``--skip-download/--audio-file/--skip-asr/--asr-file/--llm-fix`` 仅与 --summarize 搭配
@@ -79,8 +81,12 @@ def download_media(
             "参数 --skip-download / --audio-file / --skip-asr / --asr-file 仅能与 "
             "--summarize 一起使用（用于跳过流水线中的下载/转写步骤）"
         )
-    if summarize and audio_only:
-        raise MediaError("--summarize 与 --audio-only 不能同时使用")
+    if audio_only and video_only:
+        raise MediaError("--audio-only 与 --video-only 不能同时使用")
+    if summarize and (audio_only or video_only):
+        raise MediaError("--summarize 不能与 --audio-only 或 --video-only 同时使用")
+    if video_only and platform != "bilibili":
+        raise MediaError("--video-only 仅对 bilibili 平台生效")
 
     if platform == "netease":
         if summarize:
@@ -119,10 +125,15 @@ def download_media(
                 bitrate=bitrate,
                 no_metadata=no_metadata,
             )
-        # 默认：仅下载音频文件（不转换）
-        audio_path = bili.download_audio(url, out_dir, cookies=cookies)
-        print(f"完成! 已下载音频: {audio_path}")
-        return audio_path
+        # 默认下载含音轨的视频；--video-only 则只下载视频流。
+        video_path = bili.download_bilibili_video(
+            url=url,
+            output_dir=out_dir,
+            cookies=cookies,
+            video_only=video_only,
+        )
+        print(f"完成! 已保存 MP4: {video_path}")
+        return video_path
 
     # douyin / x
     if platform == "douyin":
