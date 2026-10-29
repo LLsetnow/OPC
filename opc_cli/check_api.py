@@ -20,6 +20,13 @@ from .config import (
     get_gpt_img_proxy,
 )
 from .codex_image import codex_available as _codex_available
+from .wuying import (
+    DEFAULT_API_VERSION as _WUYING_DEFAULT_API_VERSION,
+    DEFAULT_ENDPOINT as _WUYING_DEFAULT_ENDPOINT,
+    WuyingClient,
+    WuyingError,
+    resolve_api_key as _resolve_wuying_api_key,
+)
 
 
 # ── 检查结果 ──────────────────────────────────────────────────────
@@ -76,7 +83,9 @@ def get_command_availability() -> list[CommandAvailability]:
     audio_source = _key_source("ALIYUN_API_KEY")
     video_source = _key_source("ALIYUN_API_KEY")
     minimax_music_source = _key_source("MINIMAX_API_KEY")
+    minimax_video_source = _key_source("MINIMAX_API_KEY")
     music_gen_source = _key_source("ALIYUN_API_KEY", "MINIMAX_API_KEY")
+    wuying_source = _key_source("WUYING_API_KEY", "LINCORE_API_KEY")
     codex_available_ = _codex_available()
     aigate_source = _key_source("AIGATE_TOKEN")
     comfyui_source = _key_source("COMFYUI_ROOT")
@@ -162,6 +171,14 @@ def get_command_availability() -> list[CommandAvailability]:
             f"使用 {video_source}" if video_source else "缺少 ALIYUN_API_KEY",
         ),
         CommandAvailability(
+            "video generate",
+            "可用" if minimax_video_source else "不可用",
+            "MINIMAX_API_KEY",
+            f"使用 {minimax_video_source}（MiniMax H3）"
+            if minimax_video_source
+            else "缺少 MINIMAX_API_KEY",
+        ),
+        CommandAvailability(
             "speech tts",
             tts_status,
             "ALIYUN_API_KEY 或 ZHIPU_API_KEY",
@@ -187,6 +204,12 @@ def get_command_availability() -> list[CommandAvailability]:
             "可用" if aigate_source else "部分可用",
             "AIGATE_TOKEN（--workflows 除外）",
             f"使用 {aigate_source}" if aigate_source else "仅本地 --workflows 可用；缺少 AIGATE_TOKEN",
+        ),
+        CommandAvailability(
+            "wuying",
+            "可用" if wuying_source else "不可用",
+            "WUYING_API_KEY（或 LINCORE_API_KEY）",
+            f"使用 {wuying_source}" if wuying_source else "缺少 WUYING_API_KEY",
         ),
         CommandAvailability("news", "可用" if deepseek_source else "不可用", "DEEPSEEK_API_KEY", f"使用 {deepseek_source}" if deepseek_source else "缺少 DEEPSEEK_API_KEY"),
         CommandAvailability("check-api", "可用", "无需 API Key", "配置检查和连通性检查可用"),
@@ -489,6 +512,33 @@ def check_cookies() -> CheckResult:
         return CheckResult("YT_DLP_COOKIES", False, f"文件不存在: {cookies_path}")
 
 
+def check_wuying() -> CheckResult:
+    """以只读的 DescribeDesktops 请求检查无影灵构 ApiKey 和 endpoint。"""
+
+    api_key = _resolve_wuying_api_key()
+    if not api_key:
+        return CheckResult(
+            "Wuying (Workstation API)",
+            False,
+            "未配置 WUYING_API_KEY 或 LINCORE_API_KEY",
+        )
+
+    endpoint = os.environ.get("WUYING_API_ENDPOINT", _WUYING_DEFAULT_ENDPOINT)
+    version = os.environ.get("WUYING_API_VERSION", _WUYING_DEFAULT_API_VERSION)
+    t0 = time.time()
+    try:
+        client = WuyingClient(api_key, endpoint=endpoint, api_version=version, timeout=15)
+        client.request("DescribeDesktops", {"DisplayType": "Linggou"})
+        latency = int((time.time() - t0) * 1000)
+        return CheckResult("Wuying (Workstation API)", True, f"endpoint={client.endpoint}", latency)
+    except WuyingError as exc:
+        latency = int((time.time() - t0) * 1000)
+        return CheckResult("Wuying (Workstation API)", False, str(exc), latency)
+    except Exception as exc:
+        latency = int((time.time() - t0) * 1000)
+        return CheckResult("Wuying (Workstation API)", False, f"{type(exc).__name__}: {exc}", latency)
+
+
 # ── 主流程 ──────────────────────────────────────────────────────
 
 # 可用的 API 名称 → 检查函数
@@ -505,6 +555,7 @@ CHECK_MAP: dict[str, callable] = {
     "gpt-image": check_gpt_image,
     "proxy": check_proxy,
     "cookies": check_cookies,
+    "wuying": check_wuying,
 }
 
 

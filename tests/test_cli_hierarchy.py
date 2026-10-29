@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from opc_cli import cli
 
 _MODALITY_GROUPS = ("media", "music", "image", "video", "speech")
-_TOOL_COMMANDS = ("local-tts", "check-api", "comfyui", "aigate", "news")
+_TOOL_COMMANDS = ("local-tts", "check-api", "comfyui", "aigate", "wuying", "news")
 
 
 class CliHierarchyTests(unittest.TestCase):
@@ -42,6 +42,12 @@ class CliHierarchyTests(unittest.TestCase):
         result = CliRunner().invoke(cli.app, ["music", "--help"])
         self.assertEqual(result.exit_code, 0, result.output)
         for verb in ("understand", "beats", "generate"):
+            self.assertIn(verb, result.output)
+
+    def test_video_group_lists_verbs(self):
+        result = CliRunner().invoke(cli.app, ["video", "--help"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        for verb in ("understand", "generate"):
             self.assertIn(verb, result.output)
 
 

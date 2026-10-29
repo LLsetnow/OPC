@@ -21,6 +21,7 @@ dist/
 # 浏览器导出的登录会话 cookies，禁止提交。
 cookies.txt
 *_cookies.txt
+*.opc-renewal.json
 # macOS/browser cookie clipboard exports
 *.textClipping
 

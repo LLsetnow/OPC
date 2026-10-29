@@ -190,7 +190,7 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 # B站视频下载MP3
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx' --audio-only"
 
-# B站默认下载含音轨 MP4；仅下载视频流可加 --video-only
+# B站默认下载含音轨 MP4；仅下载视频流可加 --video-only，仅下载音频并转 MP3 可加 --audio-only
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx'"
 
 # B站视频完整流程（下载→ASR→总结，多平台通用）

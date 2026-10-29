@@ -27,6 +27,7 @@
 | 文生图(阿里云Qwen) | `opc image generate "描述"` | Qwen Image 3.0 文生图/图生图/图像编辑 |
 | 文生图(GPT-Image) | `opc image generate "描述" --engine gpt-image` | 经本机 codex CLI 的内置 image_gen 工具调用（gpt-image 驱动，需 ChatGPT 登录） |
 | API连通性检查 | `opc check-api` | 检查.env中各API可用性 |
+| 无影灵构工作站 API | `opc wuying products/workstations/request ...` | 使用 `WUYING_API_KEY` 调用实例、镜像、余额和订单 API |
 | AI日报 | `opc news` | 自动收集AI新闻生成简报 |
 | ComfyUI启动 | `opc comfyui --start` | 启动 ComfyUI 服务（Windows 进程） |
 | ComfyUI工作流 | `opc comfyui --run -i 图片` | 提交工作流到 ComfyUI 执行 |
@@ -190,7 +191,7 @@ wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && o
 # B站视频下载MP3
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx' --audio-only"
 
-# B站默认下载含音轨 MP4；仅下载视频流可加 --video-only
+# B站默认下载含音轨 MP4；仅下载视频流可加 --video-only，仅下载音频并转 MP3 可加 --audio-only
 wsl -e zsh -c "source ~/qwen3-tts-venv/bin/activate && cd /mnt/d/github/OPC && opc media download 'https://www.bilibili.com/video/BV1xx'"
 
 # B站视频完整流程（下载→ASR→总结，多平台通用）

@@ -202,9 +202,12 @@ def generate_with_codex(
             "--output-schema", schema_path,
             "-o", last_path,
         ]
+        # Codex CLI declares --image as a repeatable option (``<FILE>...``).
+        # Put the positional prompt first; otherwise --image consumes the
+        # prompt as another image path and Codex falls back to stdin.
+        cmd.append(agent_prompt)
         for reference in ref or []:
             cmd += ["--image", reference]
-        cmd.append(agent_prompt)
 
         try:
             result = subprocess.run(cmd, timeout=timeout)

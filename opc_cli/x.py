@@ -17,12 +17,18 @@ _COOKIES_HINT = (
 )
 
 
-def download_video(url: str, output_dir: str, cookies: str | None = None) -> str:
+def download_video(
+    url: str,
+    output_dir: str,
+    cookies: str | None = None,
+    cookies_from_browser: str | None = None,
+) -> str:
     """下载单个 X (Twitter) 视频并返回最终 MP4 的绝对路径。"""
     return _download_video(
         url,
         output_dir,
         cookies,
+        cookies_from_browser=cookies_from_browser,
         source_label="X",
         error_cls=XDownloadError,
         failure_hint=_COOKIES_HINT,

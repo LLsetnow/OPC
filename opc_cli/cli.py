@@ -1,7 +1,7 @@
-"""OPC CLI 入口：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解 + 语音合成/识别。
+"""OPC CLI 入口：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解/生成 + 语音合成/识别。
 
 命令层级：第一级 = 模态（media/music/image/video/speech），第二级 = 动词（download/generate/understand/beats/tts/asr）。
-local-tts / news / check-api / comfyui / aigate 保持一级命令。
+local-tts / news / check-api / comfyui / aigate / wuying 保持工具级命令。
 """
 
 import os
@@ -21,7 +21,15 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
 
-from .config import get_api_config, load_env, get_image_config, get_comfyui_config, get_music_gen_config, get_news_folder
+from .config import (
+    get_api_config,
+    get_minimax_video_config,
+    load_env,
+    get_image_config,
+    get_comfyui_config,
+    get_music_gen_config,
+    get_news_folder,
+)
 from .bili import asr_transcribe, generate_srt, resegment_asr
 from .audio import (
     AudioUnderstandingError,
@@ -54,6 +62,7 @@ from .tts_server import (
 from .tts import text_to_speech, clone_voice, list_voices as _tts_list_voices
 from .vision import understand_image
 from .video import VideoUnderstandingError, understand_video
+from .minimax_video import MiniMaxVideoError, generate_video, regenerate_video
 from .ai_daily import run_ai_daily
 from .check_api import get_command_availability, run_check_api
 from .comfyui import start_comfyui, stop_comfyui, check_comfyui, is_comfyui_running, submit_workflow
@@ -74,6 +83,23 @@ from .aigate import (
     submit_workflow as _aigate_submit_workflow,
     wait_for_comfyui as _aigate_wait_for_comfyui,
 )
+from .wuying import (
+    DEFAULT_API_KEY_ENV as _WUYING_API_KEY_ENV,
+    DEFAULT_API_VERSION as _WUYING_DEFAULT_API_VERSION,
+    DEFAULT_ENDPOINT as _WUYING_DEFAULT_ENDPOINT,
+    DEFAULT_SIGNATURE_VERSION as _WUYING_DEFAULT_SIGNATURE_VERSION,
+    WuyingClient,
+    WuyingError,
+    create_desktop_image as _wuying_create_desktop_image,
+    create_order as _wuying_create_order,
+    describe_core_package_list as _wuying_describe_core_package_list,
+    describe_desktops as _wuying_describe_desktops,
+    describe_package_orders as _wuying_describe_package_orders,
+    format_result as _format_wuying_result,
+    generate_scene_url as _wuying_generate_scene_url,
+    parse_json_body as _parse_wuying_json_body,
+    resolve_api_key as _resolve_wuying_api_key,
+)
 from .text2img import generate_image, download_image
 from .music_gen import download_music, generate_music
 from .gpt_image import SUPPORTED_SIZES as _GPT_SIZES
@@ -81,7 +107,7 @@ from .codex_image import CodexImageError as _CodexImageError, generate_with_code
 
 app = typer.Typer(
     name="opc",
-    help="OPC 工具集：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解 + 语音合成/识别 + 本地TTS + ComfyUI + 云扉 AIGate",
+    help="OPC 工具集：媒体下载/总结 + 音乐理解/生成 + 图片理解/生成 + 视频理解/生成 + 语音合成/识别 + 本地TTS + ComfyUI + 云扉 AIGate + 无影灵构工作站 API",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -92,14 +118,16 @@ console = Console()
 media_app = typer.Typer(help="媒体下载/总结（B站/抖音/X/网易云，URL 自动识别平台）", no_args_is_help=True)
 music_app = typer.Typer(help="音乐：理解 / 鼓点检测 / 生成", no_args_is_help=True)
 image_app = typer.Typer(help="图片：理解 / 生成（文生图、图生图、编辑）", no_args_is_help=True)
-video_app = typer.Typer(help="视频：理解", no_args_is_help=True)
+video_app = typer.Typer(help="视频：理解 / 生成", no_args_is_help=True)
 speech_app = typer.Typer(help="语音：合成（TTS）/ 识别（ASR）", no_args_is_help=True)
+wuying_app = typer.Typer(help="无影灵构工作站 API：实例、镜像、余额与订单管理", no_args_is_help=True)
 
 app.add_typer(media_app, name="media")
 app.add_typer(music_app, name="music")
 app.add_typer(image_app, name="image")
 app.add_typer(video_app, name="video")
 app.add_typer(speech_app, name="speech")
+app.add_typer(wuying_app, name="wuying")
 
 
 # ── media download ─────────────────────────────────────────────
@@ -109,6 +137,11 @@ def media_download(
     url: str = typer.Argument(..., help="媒体链接：B站 / 抖音 / X / 网易云，自动识别平台"),
     output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="输出目录（默认按平台从 .env 读取 BILI_FOLDER/DOUYIN_FOLDER/X_FOLDER/MUSIC_FOLDER，或 ./output）"),
     cookies: Optional[str] = typer.Option(None, "--cookies", help="yt-dlp cookies 文件路径"),
+    cookies_from_browser: Optional[str] = typer.Option(
+        None,
+        "--cookies-from-browser",
+        help="cookie 临近过期时用于续签的浏览器来源，如 chrome、safari 或 chrome:Default",
+    ),
     audio_only: bool = typer.Option(False, "--audio-only", help="仅下载音频并转为 MP3（仅 bilibili 生效）"),
     video_only: bool = typer.Option(
         False,
@@ -151,6 +184,7 @@ def media_download(
             url=url,
             output_dir=output_dir or "",
             cookies=cookies,
+            cookies_from_browser=cookies_from_browser,
             audio_only=audio_only,
             video_only=video_only,
             bitrate=bitrate,
@@ -661,6 +695,133 @@ def video_understand(
         console.print("\n" + "=" * 50)
         console.print(result)
         console.print("=" * 50)
+
+
+@video_app.command("generate")
+def video_generate(
+    prompt: str = typer.Argument(help="视频生成提示词"),
+    duration: int = typer.Option(5, "--duration", help="视频时长（4-15 秒）"),
+    resolution: str = typer.Option("2K", "--resolution", help="输出分辨率：768P 或 2K"),
+    ratio: str = typer.Option("16:9", "--ratio", help="文生视频画面比例；带参考素材时由输入素材决定"),
+    first_frame: Optional[str] = typer.Option(None, "--first-frame", help="首帧图片公网 URL 或 data URI"),
+    last_frame: Optional[str] = typer.Option(None, "--last-frame", help="尾帧图片公网 URL 或 data URI"),
+    reference_image: Optional[list[str]] = typer.Option(
+        None, "--reference-image", help="参考图片 URL，可重复指定"
+    ),
+    reference_video: Optional[list[str]] = typer.Option(
+        None, "--reference-video", help="参考视频 URL，可重复指定"
+    ),
+    reference_audio: Optional[list[str]] = typer.Option(
+        None, "--reference-audio", help="参考音频 URL，可重复指定"
+    ),
+    model: str = typer.Option("", "--model", help="MiniMax 模型（默认 .env 的 MINIMAX_VIDEO_MODEL 或 MiniMax-H3）"),
+    output: Optional[str] = typer.Option(
+        None, "-o", "--output", help="输出 MP4 路径（默认 output/minimax_h3_<时间戳>.mp4）"
+    ),
+    timeout: int = typer.Option(900, "--timeout", help="最长等待任务时间（秒）"),
+    poll_interval: int = typer.Option(10, "--poll-interval", help="任务轮询间隔（秒）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """调用 MiniMax H3 生成视频并自动下载结果。
+
+    示例:
+
+        opc video generate "一只橘猫在雨夜街头撑伞慢慢走过，电影感，环境声自然" \
+            --duration 5 --resolution 2K --ratio 16:9 -o output/cat.mp4
+        opc video generate "让首帧中的人物自然转身并走向远处" \
+            --first-frame https://example.com/first.png
+    """
+    load_env(env_file)
+    if output is None:
+        output = str(Path("output") / f"minimax_h3_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+
+    try:
+        api_key, base_url, configured_model = get_minimax_video_config()
+        result = generate_video(
+            prompt=prompt,
+            api_key=api_key,
+            base_url=base_url,
+            model=model or configured_model,
+            duration=duration,
+            resolution=resolution,
+            ratio=ratio,
+            first_frame=first_frame,
+            last_frame=last_frame,
+            reference_images=reference_image,
+            reference_videos=reference_video,
+            reference_audios=reference_audio,
+            output=output,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+    except (MiniMaxVideoError, OSError, ValueError) as error:
+        console.print(f"[red]视频生成失败: {error}[/red]")
+        raise typer.Exit(1)
+
+    output_path = Path(result["output"])
+    size_kb = output_path.stat().st_size / 1024
+    console.print(
+        f"[green]MiniMax H3 视频生成成功![/green] task_id={result['task_id']} "
+        f"已保存: {output_path} ({size_kb:.0f} KB)"
+    )
+    console.print(
+        f"参数: {result['duration']} 秒 | {result['resolution']} | {result['ratio']}"
+    )
+
+
+@video_app.command("regenerate")
+def video_regenerate(
+    base_video: str = typer.Argument(..., help="符合 MiniMax H3 768P 规格的源视频路径或公网 URL"),
+    prompt: Optional[str] = typer.Option(None, "--prompt", "-p", help="原始 H3 提示词"),
+    prompt_file: Optional[str] = typer.Option(None, "--prompt-file", help="从 UTF-8 文件读取原始 H3 提示词"),
+    resolution: str = typer.Option("2K", "--resolution", help="再生成目标分辨率，目前仅支持 2K"),
+    model: str = typer.Option("MiniMax-H3", "--model", help="官方再生成接口模型名，目前为 MiniMax-H3"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="输出 MP4 路径"),
+    timeout: int = typer.Option(900, "--timeout", help="最长等待任务时间（秒）"),
+    poll_interval: int = typer.Option(10, "--poll-interval", help="任务轮询间隔（秒）"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """使用 MiniMax H3 官方 video_regeneration 接口将 768P 视频再生成到 2K。"""
+    load_env(env_file)
+    if prompt and prompt_file:
+        console.print("[red]错误: --prompt 与 --prompt-file 只能二选一[/red]")
+        raise typer.Exit(1)
+    if prompt_file:
+        try:
+            prompt = Path(prompt_file).read_text(encoding="utf-8")
+        except OSError as error:
+            console.print(f"[red]错误: 无法读取提示词文件: {error}[/red]")
+            raise typer.Exit(1) from error
+    if not prompt:
+        console.print("[red]错误: 必须提供 --prompt 或 --prompt-file[/red]")
+        raise typer.Exit(1)
+    if output is None:
+        output = str(Path("output") / f"minimax_h3_2k_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+
+    try:
+        api_key, base_url, _configured_model = get_minimax_video_config()
+        result = regenerate_video(
+            prompt=prompt,
+            base_video=base_video,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            resolution=resolution,
+            output=output,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+    except (MiniMaxVideoError, OSError, ValueError) as error:
+        console.print(f"[red]视频再生成失败: {error}[/red]")
+        raise typer.Exit(1) from error
+
+    output_path = Path(result["output"])
+    size_kb = output_path.stat().st_size / 1024
+    console.print(
+        f"[green]MiniMax H3 2K 再生成成功![/green] task_id={result['task_id']} "
+        f"已保存: {output_path} ({size_kb:.0f} KB)"
+    )
+    console.print(f"参数: {result['resolution']} | task_type={result['task_type']}")
 
 
 # ── speech 模态 ────────────────────────────────────────────────
@@ -1753,6 +1914,305 @@ def aigate_cmd(
         raise typer.Exit(1)
 
 
+# ── wuying 子命令 ───────────────────────────────────────────────
+
+@wuying_app.callback()
+def wuying_context(
+    ctx: typer.Context,
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        help=f"无影灵构访问令牌（默认读取 {_WUYING_API_KEY_ENV}；命令行传入值可能进入 shell 历史）",
+    ),
+    endpoint: Optional[str] = typer.Option(
+        None,
+        "--endpoint",
+        help=f"API 地址（默认 {_WUYING_DEFAULT_ENDPOINT}，也可设置 WUYING_API_ENDPOINT）",
+    ),
+    api_version: Optional[str] = typer.Option(
+        None,
+        "--version",
+        help=f"API 版本（默认 {_WUYING_DEFAULT_API_VERSION}）",
+    ),
+    signature_version: Optional[str] = typer.Option(
+        None,
+        "--signature-version",
+        help=f"签名版本参数（默认 {_WUYING_DEFAULT_SIGNATURE_VERSION}）",
+    ),
+    api_key_placement: str = typer.Option(
+        "body",
+        "--api-key-placement",
+        help="ApiKey 放置位置：body（推荐）或 query",
+    ),
+    timeout: float = typer.Option(30.0, "--timeout", help="单次 API 请求超时秒数"),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="自定义 .env 文件路径"),
+):
+    """无影灵构工作站 API。
+
+    通用配置放在子命令之前，例如：
+
+        opc wuying --api-key "$WUYING_API_KEY" workstations
+        opc wuying --env-file .env request DescribeDesktops --body '{}'
+
+    默认使用 ``POST``，Action 等协议参数放在 URL，ApiKey 放在 JSON Body。
+    """
+    load_env(env_file)
+    ctx.ensure_object(dict).update(
+        {
+            "api_key": api_key,
+            "endpoint": endpoint or os.environ.get("WUYING_API_ENDPOINT", _WUYING_DEFAULT_ENDPOINT),
+            "api_version": api_version or os.environ.get("WUYING_API_VERSION", _WUYING_DEFAULT_API_VERSION),
+            "signature_version": signature_version
+            or os.environ.get("WUYING_SIGNATURE_VERSION", _WUYING_DEFAULT_SIGNATURE_VERSION),
+            "api_key_placement": api_key_placement,
+            "timeout": timeout,
+        }
+    )
+
+
+def _wuying_client_from_context(ctx: typer.Context) -> WuyingClient:
+    config = ctx.ensure_object(dict)
+    try:
+        return WuyingClient(
+            _resolve_wuying_api_key(config.get("api_key")),
+            endpoint=config["endpoint"],
+            api_version=config["api_version"],
+            signature_version=config["signature_version"],
+            api_key_placement=config["api_key_placement"],
+            timeout=config["timeout"],
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+def _run_wuying_action(
+    ctx: typer.Context,
+    action: str,
+    payload: Optional[dict] = None,
+    *,
+    compact: bool = False,
+) -> None:
+    try:
+        result = _wuying_client_from_context(ctx).request(action, payload)
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result, compact=compact))
+
+
+@wuying_app.command("request")
+def wuying_request(
+    ctx: typer.Context,
+    action: str = typer.Argument(..., help="无影灵构 API Action，例如 DescribeDesktops"),
+    body: Optional[str] = typer.Option(None, "--body", help="JSON 请求 Body"),
+    body_file: Optional[str] = typer.Option(None, "--body-file", help="从 UTF-8 JSON 文件读取请求 Body"),
+    compact: bool = typer.Option(False, "--compact", help="紧凑 JSON 输出"),
+):
+    """通用 API 请求，覆盖尚未封装的无影灵构 Action。"""
+    try:
+        payload = _parse_wuying_json_body(body, body_file)
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    _run_wuying_action(ctx, action, payload, compact=compact)
+
+
+@wuying_app.command("products")
+def wuying_products(
+    ctx: typer.Context,
+    product_type: str = typer.Option(
+        "linggou_postpaid_container",
+        "--type",
+        help="商品类型，例如 linggou_postpaid_container 或 linggou_core_package",
+    ),
+):
+    """获取可部署的工作站规格和 ProductCode。"""
+    _run_wuying_action(ctx, "GetProductList", {"Type": product_type})
+
+
+@wuying_app.command("workstations")
+def wuying_workstations(
+    ctx: typer.Context,
+    desktop_id: Optional[str] = typer.Option(None, "--desktop-id", help="只查询指定工作站；省略则查询列表"),
+    display_type: str = typer.Option("Linggou", "--display-type"),
+):
+    """查询工作站列表或指定工作站状态。"""
+    try:
+        result = _wuying_describe_desktops(
+            _wuying_client_from_context(ctx),
+            desktop_id=desktop_id,
+            display_type=display_type,
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result))
+
+
+@wuying_app.command("create")
+def wuying_create(
+    ctx: typer.Context,
+    image_id: str = typer.Option(..., "--image-id", help="工作站镜像 ID"),
+    product_code: str = typer.Option(..., "--product-code", help="由 products 返回的 ProductCode"),
+    desktop_name: str = typer.Option("无影工作站", "--name", help="工作站名称"),
+    amount: int = typer.Option(1, "--amount", min=1, help="创建数量"),
+    sku: str = typer.Option("CUSTOM", "--sku", help="商品 SKU，默认 CUSTOM"),
+    root_disk_size: int = typer.Option(100, "--root-disk-size", min=1, help="系统盘 GiB"),
+    data_disk_size: int = typer.Option(40, "--data-disk-size", min=0, help="数据盘 GiB"),
+    internet_bandwidth: int = typer.Option(40, "--internet-bandwidth", min=0, help="带宽 Mbps"),
+    yes: bool = typer.Option(False, "--yes", help="确认创建可能产生费用的工作站"),
+):
+    """创建动态工作站订单。
+
+    这是可能产生费用的操作，必须显式添加 ``--yes``。
+    """
+    if not yes:
+        console.print("[yellow]创建工作站可能产生费用；如确认请添加 --yes。[/yellow]")
+        raise typer.Exit(1)
+    try:
+        result = _wuying_create_order(
+            _wuying_client_from_context(ctx),
+            desktop_name=desktop_name,
+            image_id=image_id,
+            product_code=product_code,
+            amount=amount,
+            sku=sku,
+            root_disk_size=root_disk_size,
+            data_disk_size=data_disk_size,
+            internet_bandwidth=internet_bandwidth,
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result))
+
+
+@wuying_app.command("start")
+def wuying_start(ctx: typer.Context, desktop_id: str = typer.Argument(..., help="工作站 DesktopId")):
+    """启动处于 Stopped 状态的工作站。"""
+    _run_wuying_action(ctx, "StartDesktop", {"DesktopId": desktop_id})
+
+
+@wuying_app.command("stop")
+def wuying_stop(ctx: typer.Context, desktop_id: str = typer.Argument(..., help="工作站 DesktopId")):
+    """停止处于 Running 状态的工作站。"""
+    _run_wuying_action(ctx, "StopDesktop", {"DesktopId": desktop_id})
+
+
+@wuying_app.command("delete")
+def wuying_delete(
+    ctx: typer.Context,
+    desktop_id: str = typer.Argument(..., help="工作站 DesktopId"),
+    yes: bool = typer.Option(False, "--yes", help="确认不可逆地删除工作站"),
+):
+    """删除工作站。此操作不可逆，必须显式添加 ``--yes``。"""
+    if not yes:
+        console.print("[yellow]删除工作站不可逆；如确认请添加 --yes。[/yellow]")
+        raise typer.Exit(1)
+    _run_wuying_action(ctx, "DeleteDesktop", {"DesktopId": desktop_id})
+
+
+@wuying_app.command("scene-url")
+def wuying_scene_url(
+    ctx: typer.Context,
+    desktop_id: str = typer.Argument(..., help="工作站 DesktopId"),
+    product_type: str = typer.Option("WuyingWorkStation", "--product-type"),
+    scene: str = typer.Option("ComfyUi", "--scene", help="ComfyUi 或 Jupyter 等场景"),
+    client_type: Optional[str] = typer.Option(None, "--client-type"),
+):
+    """获取工作站的 ComfyUI/Jupyter 场景访问 URL。"""
+    try:
+        result = _wuying_generate_scene_url(
+            _wuying_client_from_context(ctx),
+            desktop_id=desktop_id,
+            product_type=product_type,
+            scene=scene,
+            client_type=client_type,
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result))
+
+
+@wuying_app.command("create-image")
+def wuying_create_image(
+    ctx: typer.Context,
+    desktop_id: str = typer.Argument(..., help="已停止工作站的 DesktopId"),
+    image_name: str = typer.Option(..., "--name", help="镜像名称"),
+    disk_type: str = typer.Option("ALL", "--disk-type", help="ALL 或 SYSTEM"),
+    description: str = typer.Option("", "--description"),
+):
+    """从工作站制作镜像；通常应先停止工作站。"""
+    if disk_type not in {"ALL", "SYSTEM"}:
+        console.print("[red]错误: --disk-type 只能是 ALL 或 SYSTEM[/red]")
+        raise typer.Exit(1)
+    try:
+        result = _wuying_create_desktop_image(
+            _wuying_client_from_context(ctx),
+            desktop_id=desktop_id,
+            disk_type=disk_type,
+            image_name=image_name,
+            description=description,
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result))
+
+
+@wuying_app.command("image-detail")
+def wuying_image_detail(ctx: typer.Context, image_id: str = typer.Argument(..., help="ImageId")):
+    """查询镜像制作状态。"""
+    _run_wuying_action(ctx, "DescribeImageDetail", {"ImageId": image_id})
+
+
+@wuying_app.command("balance")
+def wuying_balance(
+    ctx: typer.Context,
+    query_deduction_instances: bool = typer.Option(False, "--query-deduction-instances"),
+    query_scenario: Optional[str] = typer.Option("LinggouScenario", "--query-scenario"),
+):
+    """查询无影灵豆/核时余额及抵扣实例。"""
+    try:
+        result = _wuying_describe_core_package_list(
+            _wuying_client_from_context(ctx),
+            query_deduction_instances=query_deduction_instances,
+            query_scenario=query_scenario,
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result))
+
+
+@wuying_app.command("orders")
+def wuying_orders(
+    ctx: typer.Context,
+    current_page: int = typer.Option(1, "--page", min=1),
+    page_size: int = typer.Option(10, "--page-size", min=1),
+    product_types: Optional[str] = typer.Option(
+        None,
+        "--product-types",
+        help="产品类型，逗号分隔，例如 POST_PAID_LINGGOU_CONTAINER,CORE_PACKAGE",
+    ),
+):
+    """查询工作站和无影灵豆相关订单。"""
+    types = [item.strip() for item in product_types.split(",") if item.strip()] if product_types else None
+    try:
+        result = _wuying_describe_package_orders(
+            _wuying_client_from_context(ctx),
+            current_page=current_page,
+            page_size=page_size,
+            product_type_list=types,
+        )
+    except WuyingError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    typer.echo(_format_wuying_result(result))
+
+
 # ── news 子命令 ──────────────────────────────────────────────
 
 @app.command("news")
@@ -1780,7 +2240,7 @@ def ai_daily(
 
 # 帮助列表顺序：模态组优先，工具命令在后（typer 默认先注册 @app.command、后注册组）
 _HELP_ORDER = ["media", "music", "image", "video", "speech",
-               "local-tts", "check-api", "comfyui", "aigate", "news"]
+               "local-tts", "check-api", "comfyui", "aigate", "wuying", "news"]
 
 
 def main():

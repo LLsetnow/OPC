@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .cookies import prepare_cookie_file
+
 
 def _check_ffmpeg():
     try:
@@ -45,7 +47,13 @@ def _get_type_from_url(url):
     return "single"
 
 
-def download_music(url, output_dir, cookies=None, playlist=False):
+def download_music(
+    url,
+    output_dir,
+    cookies=None,
+    playlist=False,
+    cookies_from_browser=None,
+):
     """下载网易云音乐，返回 (audio_path, info_dict)
 
     支持 song / album / playlist / artist 四种 URL 类型。
@@ -57,6 +65,8 @@ def download_music(url, output_dir, cookies=None, playlist=False):
 
     url = _normalize_url(url)
     url_type = _get_type_from_url(url)
+    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
+    cookies = prepare_cookie_file(cookies, url, browser=cookies_from_browser)
 
     # 是否下载全部曲目
     is_playlist = playlist or url_type in ("album", "playlist", "artist")
@@ -219,13 +229,27 @@ def embed_metadata(mp3_path, info, cover_path=None):
     print("ID3 元数据已写入（标题 + 歌手 + 专辑 + 封面）")
 
 
-def run_music(url, output_dir="./output", bitrate=192, no_metadata=False, cookies=None, playlist=False):
+def run_music(
+    url,
+    output_dir="./output",
+    bitrate=192,
+    no_metadata=False,
+    cookies=None,
+    playlist=False,
+    cookies_from_browser=None,
+):
     """music 主流程：下载网易云音乐 → 转为 MP3 → 嵌入元数据"""
     output_dir = os.path.abspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     # Step 1: 下载音频
-    audio_path, info = download_music(url, output_dir, cookies=cookies, playlist=playlist)
+    audio_path, info = download_music(
+        url,
+        output_dir,
+        cookies=cookies,
+        playlist=playlist,
+        cookies_from_browser=cookies_from_browser,
+    )
 
     # 如果是 playlist/album/artist，批量下载后直接返回
     if audio_path is None:

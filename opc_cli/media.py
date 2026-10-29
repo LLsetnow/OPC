@@ -61,6 +61,7 @@ def download_media(
     skip_asr: bool = False,
     asr_file: str = None,
     llm_fix: bool = False,
+    cookies_from_browser: str = None,
     video_only: bool = False,
 ):
     """统一媒体下载入口，按 URL 平台分发。
@@ -72,8 +73,10 @@ def download_media(
     - ``--bitrate/--no-metadata`` 影响 MP3 输出（bilibili --audio-only 与 netease）
     - ``--playlist`` 仅 netease（网易云）歌单下载生效
     - ``--skip-download/--audio-file/--skip-asr/--asr-file/--llm-fix`` 仅与 --summarize 搭配
+    - ``cookies_from_browser`` 仅在 cookie 剩余寿命少于一半时用于滑动续签
     """
     platform = detect_platform(url)
+    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
 
     pipeline_flags = skip_download or audio_file or skip_asr or asr_file
     if pipeline_flags and not summarize:
@@ -99,6 +102,7 @@ def download_media(
             no_metadata=no_metadata,
             cookies=cookies,
             playlist=playlist,
+            cookies_from_browser=cookies_from_browser,
         )
 
     if platform == "bilibili":
@@ -108,6 +112,7 @@ def download_media(
                 url=url,
                 output_dir=out_dir,
                 cookies=cookies,
+                cookies_from_browser=cookies_from_browser,
                 skip_download=skip_download,
                 audio_file=audio_file,
                 skip_asr=skip_asr,
@@ -121,6 +126,7 @@ def download_media(
                 url=url,
                 output_dir=out_dir,
                 cookies=cookies,
+                cookies_from_browser=cookies_from_browser,
                 audio_only=True,
                 bitrate=bitrate,
                 no_metadata=no_metadata,
@@ -130,6 +136,7 @@ def download_media(
             url=url,
             output_dir=out_dir,
             cookies=cookies,
+            cookies_from_browser=cookies_from_browser,
             video_only=video_only,
         )
         print(f"完成! 已保存 MP4: {video_path}")
@@ -146,6 +153,7 @@ def download_media(
             url=url,
             output_dir=out_dir,
             cookies=cookies,
+            cookies_from_browser=cookies_from_browser,
             skip_download=skip_download,
             audio_file=audio_file,
             skip_asr=skip_asr,
@@ -156,15 +164,24 @@ def download_media(
         )
     if audio_only:
         raise MediaError("--audio-only 仅对 bilibili 平台生效（抖音/X 请直接下载视频）")
-    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
     if platform == "douyin":
         try:
-            output_path = download_douyin_video(url, out_dir, cookies)
+            output_path = download_douyin_video(
+                url,
+                out_dir,
+                cookies,
+                cookies_from_browser=cookies_from_browser,
+            )
         except DouyinDownloadError as error:
             raise MediaError(f"抖音下载失败: {error}") from error
     else:
         try:
-            output_path = download_x_video(url, out_dir, cookies)
+            output_path = download_x_video(
+                url,
+                out_dir,
+                cookies,
+                cookies_from_browser=cookies_from_browser,
+            )
         except XDownloadError as error:
             raise MediaError(f"X 下载失败: {error}") from error
     print(f"完成! 已保存 MP4: {output_path}")

@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .cookies import prepare_cookie_file
+
 
 def ensure_ytdlp(error_cls: type[Exception]) -> None:
     """确认 yt-dlp 可用，避免下载到一半才报缺少依赖。"""
@@ -130,6 +132,7 @@ def download_video(
     output_dir: str,
     cookies: str | None,
     *,
+    cookies_from_browser: str | None = None,
     video_only: bool = False,
     source_label: str,
     error_cls: type[Exception],
@@ -142,6 +145,7 @@ def download_video(
     ``video_only`` 为 True 时仅下载无音轨的视频流。
     """
     ensure_ytdlp(error_cls)
+    cookies = prepare_cookie_file(cookies, url, browser=cookies_from_browser)
 
     destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
