@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from opc_cli import cli
 
 _MODALITY_GROUPS = ("media", "music", "image", "video", "speech")
-_TOOL_COMMANDS = ("local-tts", "check-api", "comfyui", "aigate", "news")
+_TOOL_COMMANDS = ("local-tts", "check-api", "comfyui", "aigate", "wuying", "news")
 
 
 class CliHierarchyTests(unittest.TestCase):

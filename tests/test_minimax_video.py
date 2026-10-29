@@ -12,8 +12,10 @@ from opc_cli import cli
 from opc_cli.config import get_minimax_video_config
 from opc_cli.minimax_video import (
     MiniMaxVideoError,
+    build_regeneration_payload,
     build_video_payload,
     generate_video,
+    regenerate_video,
 )
 
 
@@ -117,6 +119,61 @@ class MiniMaxVideoClientTests(unittest.TestCase):
         )
         self.assertEqual(get.call_args_list[1].args[0], "https://example.com/result.mp4")
 
+    def test_regeneration_payload_uses_base_video_role_and_2k(self):
+        payload = build_regeneration_payload(
+            prompt="Regenerate this H3 video at higher resolution",
+            base_video="data:video/mp4;base64,ZmFrZQ==",
+        )
+
+        self.assertEqual(payload["resolution"], "2K")
+        self.assertEqual(payload["content"][0]["type"], "text")
+        self.assertEqual(payload["content"][1]["role"], "base_video")
+        self.assertEqual(payload["content"][1]["video_url"]["url"], "data:video/mp4;base64,ZmFrZQ==")
+
+    def test_regenerate_video_posts_to_regeneration_endpoint(self):
+        create_response = Mock()
+        create_response.json.return_value = {"task_id": "regen-123"}
+        query_response = Mock()
+        query_response.json.return_value = {
+            "task": {
+                "status": "succeeded",
+                "content": {"url": "https://example.com/regenerated.mp4"},
+            }
+        }
+        download_response = Mock()
+        download_response.iter_content.return_value = [b"2k-video"]
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "opc_cli.minimax_video.requests.post", return_value=create_response
+        ) as post, patch(
+            "opc_cli.minimax_video.requests.get",
+            side_effect=[query_response, download_response],
+        ) as get:
+            result = regenerate_video(
+                prompt="Regenerate this H3 video at higher resolution",
+                base_video="data:video/mp4;base64,ZmFrZQ==",
+                api_key="test-key",
+                base_url="https://api.minimaxi.com/",
+                output=str(Path(temp_dir) / "result_2k.mp4"),
+                sleep_fn=lambda _seconds: None,
+            )
+
+        self.assertEqual(result["task_id"], "regen-123")
+        self.assertEqual(result["task_type"], "regeneration")
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://api.minimaxi.com/v2/video_regeneration",
+        )
+        self.assertEqual(post.call_args.kwargs["json"]["model"], "MiniMax-H3")
+        self.assertEqual(
+            post.call_args.kwargs["json"]["content"][1]["role"],
+            "base_video",
+        )
+        self.assertEqual(
+            get.call_args_list[0].args[0],
+            "https://api.minimaxi.com/v2/query/video_generation/regen-123",
+        )
+
     def test_cli_passes_minimax_video_options(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = str(Path(temp_dir) / "h3.mp4")
@@ -156,6 +213,42 @@ class MiniMaxVideoClientTests(unittest.TestCase):
             self.assertEqual(generate.call_args.kwargs["resolution"], "768P")
             self.assertEqual(generate.call_args.kwargs["ratio"], "16:9")
             self.assertEqual(generate.call_args.kwargs["output"], output)
+
+    def test_cli_regenerate_reads_prompt_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            prompt_file = Path(temp_dir) / "prompt.txt"
+            prompt_file.write_text("Original H3 prompt", encoding="utf-8")
+            output = str(Path(temp_dir) / "h3_2k.mp4")
+            with patch("opc_cli.cli.load_env"), patch(
+                "opc_cli.cli.get_minimax_video_config",
+                return_value=("test-key", "https://api.minimaxi.com", "MiniMax-H3"),
+            ), patch(
+                "opc_cli.cli.regenerate_video",
+                return_value={
+                    "task_id": "regen-123",
+                    "output": output,
+                    "resolution": "2K",
+                    "task_type": "regeneration",
+                },
+            ) as regenerate:
+                Path(output).write_bytes(b"video")
+                result = CliRunner().invoke(
+                    cli.app,
+                    [
+                        "video",
+                        "regenerate",
+                        "source.mp4",
+                        "--prompt-file",
+                        str(prompt_file),
+                        "-o",
+                        output,
+                    ],
+                )
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(regenerate.call_args.kwargs["prompt"], "Original H3 prompt")
+            self.assertEqual(regenerate.call_args.kwargs["base_video"], "source.mp4")
+            self.assertEqual(regenerate.call_args.kwargs["resolution"], "2K")
 
 
 if __name__ == "__main__":

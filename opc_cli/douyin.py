@@ -9,12 +9,18 @@ class DouyinDownloadError(RuntimeError):
     """抖音视频下载失败。"""
 
 
-def download_video(url: str, output_dir: str, cookies: str | None = None) -> str:
+def download_video(
+    url: str,
+    output_dir: str,
+    cookies: str | None = None,
+    cookies_from_browser: str | None = None,
+) -> str:
     """下载单个抖音视频并返回最终 MP4 的绝对路径。"""
     return _download_video(
         url,
         output_dir,
         cookies,
+        cookies_from_browser=cookies_from_browser,
         source_label="抖音",
         error_cls=DouyinDownloadError,
     )

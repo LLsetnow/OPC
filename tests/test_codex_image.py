@@ -109,6 +109,44 @@ class GenerateWithCodexTests(unittest.TestCase):
             self.assertIn(output, prompt)
             self.assertIn('{"image_path"', prompt)
 
+    def test_reference_flags_follow_prompt_in_codex_exec_argv(self):
+        version = subprocess.CompletedProcess(
+            ["codex", "--version"], 0, stdout="codex-cli 0.147.0\n"
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = str(Path(temporary) / "out.png")
+            reference = str(Path(temporary) / "reference.png")
+            Path(output).write_bytes(b"png")
+            Path(reference).write_bytes(b"png")
+
+            def fake_run(cmd, **kwargs):
+                if "--output-schema" in cmd:
+                    last_path = cmd[cmd.index("-o") + 1]
+                    Path(last_path).write_text(
+                        json.dumps({"image_path": output}), encoding="utf-8"
+                    )
+                    return subprocess.CompletedProcess(cmd, 0)
+                return version
+
+            with patch("opc_cli.codex_image.shutil.which", return_value="/usr/bin/codex"), patch(
+                "opc_cli.codex_image.subprocess.run", side_effect=fake_run
+            ) as run:
+                paths = generate_with_codex(
+                    "参考这张图的构图生成一张海报",
+                    output,
+                    size="9:16",
+                    ref=[reference],
+                    enhance=False,
+                )
+
+            self.assertEqual(paths, [output])
+            command = run.call_args.args[0]
+            prompt_index = next(index for index, value in enumerate(command) if value.startswith("使用内置 image_gen"))
+            image_index = command.index("--image")
+            self.assertLess(prompt_index, image_index)
+            self.assertEqual(command[image_index + 1], reference)
+
     def test_timeout_raises(self):
         version = subprocess.CompletedProcess(
             ["codex", "--version"], 0, stdout="codex-cli 0.147.0\n"

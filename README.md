@@ -43,6 +43,7 @@ opc speech asr <音频>           语音识别：音频 → SRT/JSON 字幕
 opc local-tts                   本地语音合成 + 服务管理（Qwen3-TTS）
 opc comfyui                     ComfyUI 进程管理 + 工作流提交
 opc aigate                      云扉 AIGate ComfyUI 实例管理 + 工作流提交
+opc wuying                      无影灵构工作站 API（实例/镜像/余额/订单）
 opc check-api                   检查 .env 中 API 的连通性
 opc news                        AI 日报：自动收集 AI 新闻并生成简报
 ```
@@ -63,6 +64,7 @@ opc news                        AI 日报：自动收集 AI 新闻并生成简�
 | `GPT_IMAGE_API_KEY` / `GPT_IMAGE_BASE_URL` / `GPT_IMAGE_MODEL` | GPT-Image-2 文生图 | image generate --engine gpt-image |
 | `GPT_IMG_PROXY` | gpt-image 代理，WSL 下自动启用 | image generate --engine gpt-image (--proxy) |
 | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 | media download |
+| `YT_DLP_COOKIES_FROM_BROWSER` | cookie 临近过期时用于续签的浏览器来源（如 `chrome`、`safari`、`chrome:Default`） | media download |
 | `BILI_FOLDER` | B站默认输出目录 | media download |
 | `DOUYIN_FOLDER` | 抖音默认输出目录 | media download |
 | `X_FOLDER` | X 视频默认输出目录 | media download |
@@ -71,6 +73,8 @@ opc news                        AI 日报：自动收集 AI 新闻并生成简�
 | `COMFYUI_ROOT` | ComfyUI 根目录 | comfyui --start |
 | `AIGATE_TOKEN` | 云扉 Bearer Token | aigate |
 | `AIGATE_SKU_NAME` / `AIGATE_AREA_NAME` / `AIGATE_IMAGE_ID` / `AIGATE_IMAGE_TYPE` | 显式创建云扉实例的预设 GPU、区域和镜像 | aigate --start --create |
+| `WUYING_API_KEY` | 无影灵构访问令牌（ApiKey） | wuying |
+| `WUYING_API_ENDPOINT` / `WUYING_API_VERSION` / `WUYING_SIGNATURE_VERSION` | 覆盖无影灵构 API 地址和协议版本 | wuying |
 
 ---
 
@@ -83,6 +87,12 @@ opc news                        AI 日报：自动收集 AI 新闻并生成简�
 ```bash
 # 完整流程：下载 → ASR → 总结（B站/抖音/X 通用）
 opc media download "https://www.bilibili.com/video/BV1xx" --summarize
+
+# 下载 B站视频（默认 MP4，含音轨）
+opc media download "https://www.bilibili.com/video/BV1xx"
+
+# 仅下载 B站视频流（无音轨）
+opc media download "https://www.bilibili.com/video/BV1xx" --video-only
 
 # 指定输出目录
 opc media download "https://..." -o ./my_output --summarize
@@ -109,6 +119,9 @@ opc media download "URL" --summarize --skip-download --skip-asr --asr-file ./out
 # 使用 cookies 下载需要登录的视频
 opc media download "https://..." --cookies ./cookies.txt
 
+# cookie 剩余寿命少于一半时，从浏览器重新导出后再下载
+opc media download "https://..." --cookies ./cookies.txt --cookies-from-browser chrome
+
 # 抖音视频下载为 MP4
 opc media download "https://www.douyin.com/video/7644571768053571003"
 
@@ -132,7 +145,9 @@ opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 
 | `url` | | | 媒体链接，自动识别平台：bilibili.com / b23.tv / douyin.com / x.com / twitter.com / music.163.com |
 | `--output-dir` | `-o` | 按平台读 `BILI_FOLDER`/`DOUYIN_FOLDER`/`X_FOLDER`/`MUSIC_FOLDER` 或 `./output` | 输出目录 |
 | `--cookies` | | `YT_DLP_COOKIES` | yt-dlp cookies 文件路径 |
+| `--cookies-from-browser` | | `YT_DLP_COOKIES_FROM_BROWSER` | cookie 剩余寿命少于一半时用于续签的浏览器来源；支持 yt-dlp 的 browser specification |
 | `--audio-only` | | `false` | 仅下载音频并转为 MP3（仅 bilibili 生效） |
+| `--video-only` | | `false` | 仅下载无音轨的视频并输出 MP4（仅 bilibili 生效；不能与 `--audio-only` 或 `--summarize` 同用） |
 | `--bitrate` | | `192` | MP3 比特率（`--audio-only` 或网易云时生效） |
 | `--no-metadata` | | `false` | 跳过 MP3 的 ID3 元数据写入 |
 | `--playlist` | | `false` | 下载全部曲目（网易云专辑/歌单/歌手链接默认已启用） |
@@ -144,17 +159,20 @@ opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 
 | `--llm-fix` | | `false` | 使用 LLM 修复 ASR 断词和标点错误 |
 | `--env-file` | | | 自定义 .env 文件路径 |
 
-### 输出文件（--summarize 模式）
+### 输出文件
 
 | 文件 | 说明 |
 |---|---|
-| `{title}.m4a` | 下载的音频文件 |
+| `{title}.mp4` | B站下载的视频；默认含音轨，使用 `--video-only` 时不含音轨 |
+| `{title}.m4a` | `--summarize` 模式下载并用于转写的音频文件 |
 | `{title}.mp3` | `--audio-only` 模式生成的 MP3（默认含标题、UP主和封面） |
 | `{title}.srt` | SRT 字幕文件 |
 | `{title}.asr.json` | ASR 原始结果（JSON） |
 | `{title}.md` | Markdown 内容总结（含视频时间线链接） |
 
 抖音的登录、年龄限制或反爬校验可能要求导出登录后的 cookies；X 大量视频对未登录用户不可见，报 "No video could be found" 时请用 `--cookies` 重试。请只下载有权保存或使用的视频。
+
+cookie 文件支持滑动续签：每次使用时读取 Netscape 格式中最早的持久 cookie 过期时间，首次使用以文件修改时间作为生命周期起点，之后用同目录下只含时间戳的 `.opc-renewal.json` sidecar 保留这个起点；剩余寿命少于该生命周期的一半时，若配置了 `YT_DLP_COOKIES_FROM_BROWSER` 或传入 `--cookies-from-browser`，OPC 会让 yt-dlp 从浏览器 profile 重新导出到临时文件，校验后原子替换旧文件。OPC 不会直接修改过期时间，也不会在没有浏览器来源时伪造续签；浏览器必须仍处于已登录状态。sidecar 不记录 cookie 值，且已加入忽略规则。只有 session cookie 的文件没有可判断的过期时间，因此不会触发该机制。
 
 ---
 
@@ -852,6 +870,46 @@ opc aigate --release --instance INSTANCE_ID
 
 ---
 
+## wuying — 无影灵构工作站 API
+
+调用无影灵构工作站 API，统一使用 `POST` + JSON。访问令牌默认从 `WUYING_API_KEY` 读取，ApiKey 放在 JSON Body 中；如需兼容旧接口，可用全局参数 `--api-key-placement query` 放入 URL Query。API 请求不会把令牌写入输出或日志。
+
+全局配置必须放在 `wuying` 和具体子命令之间：
+
+```bash
+# 查询可部署规格，先从响应中取得 ProductCode
+opc wuying products
+
+# 查询工作站状态
+opc wuying workstations
+opc wuying workstations --desktop-id ws-xxxx
+
+# 创建订单：可能产生费用，必须显式确认
+opc wuying create --yes \
+  --image-id IMAGE_ID \
+  --product-code PRODUCT_CODE \
+  --name "我的 ComfyUI 工作站"
+
+# 生命周期管理
+opc wuying start DESKTOP_ID
+opc wuying stop DESKTOP_ID
+opc wuying delete DESKTOP_ID --yes
+
+# 获取 ComfyUI 场景 URL
+opc wuying scene-url DESKTOP_ID --scene ComfyUi
+
+# 查询灵豆/核时余额和订单
+opc wuying balance --query-deduction-instances
+opc wuying orders --page 1 --page-size 10
+
+# 未封装的 Action 使用通用请求
+opc wuying request DescribeDesktops --body '{"DisplayType":"Linggou"}'
+```
+
+默认 endpoint 为 `https://wuying-personal-pc.cn-hangzhou.aliyuncs.com`，协议版本为 `2025-11-11`。可通过 `WUYING_API_ENDPOINT`、`WUYING_API_VERSION`、`WUYING_SIGNATURE_VERSION` 覆盖。创建和删除分别需要 `--yes`；删除工作站不可逆。官方接口流程和字段以[无影灵构 API Cookbook](https://docs-lincore.wuying.com/demo/)为准。
+
+---
+
 ## check-api — API 连通性检查
 
 根据当前 `.env` 中的凭证配置，先列出每个 `opc` 命令的可用程度，再检查 API 的连通性、状态、耗时和详情。
@@ -946,6 +1004,7 @@ opc_cli/
 ├── vision.py       # 图片理解（视觉模型）
 ├── comfyui.py      # ComfyUI 进程管理 + 工作流提交
 ├── aigate.py       # 云扉 AIGate ComfyUI 实例管理 + 工作流提交
+├── wuying.py       # 无影灵构工作站 API 客户端与请求封装
 ├── check_api.py    # API 连通性检查
 ├── codex_image.py  # GPT-Image 文生图（经本机 codex CLI 的内置 image_gen 工具）
 ├── gpt_image.py    # 旧版 GPT-Image API 客户端（已不再被 CLI 使用）

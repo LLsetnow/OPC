@@ -1,5 +1,7 @@
-"""MiniMax H3 视频生成客户端（当前 v2 异步接口）。"""
+"""MiniMax H3 视频生成与 2K 再生成客户端（当前 v2 异步接口）。"""
 
+import base64
+import mimetypes
 import time
 from pathlib import Path
 from typing import Callable, Iterable, Optional
@@ -8,8 +10,10 @@ import requests
 
 
 VIDEO_GENERATION_PATH = "/v2/video_generation"
+VIDEO_REGENERATION_PATH = "/v2/video_regeneration"
 VIDEO_QUERY_PATH = "/v2/query/video_generation"
 SUPPORTED_RESOLUTIONS = {"768P", "2K"}
+REGENERATION_RESOLUTION = "2K"
 SUPPORTED_RATIOS = {
     "adaptive",
     "1:1",
@@ -30,6 +34,29 @@ MAX_AUDIOS = 3
 
 class MiniMaxVideoError(RuntimeError):
     """MiniMax H3 视频生成请求失败。"""
+
+
+def _resolve_base_video(value: str) -> str:
+    """将再生成源视频解析为远端 URL 或符合接口限制的 data URI。"""
+    value = value.strip()
+    if not value:
+        raise MiniMaxVideoError("--base-video 不能为空")
+    if _is_http_url(value) or value.startswith("data:"):
+        return value
+
+    path = Path(value).expanduser()
+    if not path.is_file():
+        raise MiniMaxVideoError(
+            f"再生成源视频必须是本地文件、HTTP(S) URL 或 data URI: {value}"
+        )
+    if path.suffix.lower() not in {".mp4", ".mov"}:
+        raise MiniMaxVideoError("再生成源视频仅支持 .mp4 或 .mov")
+    if path.stat().st_size > 50 * 1024 * 1024:
+        raise MiniMaxVideoError("再生成源视频不能超过 50 MB")
+
+    mime_type = mimetypes.guess_type(path.name)[0] or "video/mp4"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def _is_http_url(value: str) -> bool:
@@ -226,6 +253,69 @@ def create_video_task(
     return str(task_id)
 
 
+def build_regeneration_payload(
+    *,
+    prompt: str,
+    base_video: str,
+    resolution: str = REGENERATION_RESOLUTION,
+) -> dict:
+    """构造 MiniMax H3 ``/video_regeneration`` 请求体。"""
+    prompt = prompt.strip()
+    if not prompt:
+        raise MiniMaxVideoError("提示词不能为空")
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        raise MiniMaxVideoError(
+            f"提示词过长：当前 {len(prompt)} 字符，MiniMax H3 上限为 {MAX_PROMPT_LENGTH} 字符"
+        )
+
+    resolution = resolution.strip().upper()
+    if resolution != REGENERATION_RESOLUTION:
+        raise MiniMaxVideoError("视频再生成当前仅支持 2K 分辨率")
+
+    return {
+        "content": [
+            {"type": "text", "text": prompt},
+            {
+                "type": "video_url",
+                "video_url": {"url": _resolve_base_video(base_video)},
+                "role": "base_video",
+            },
+        ],
+        "resolution": resolution,
+    }
+
+
+def create_regeneration_task(
+    *,
+    api_key: str,
+    base_url: str,
+    payload: dict,
+    model: str = "MiniMax-H3",
+    request_timeout: int = 120,
+) -> str:
+    """创建 H3 2K 再生成异步任务并返回 task_id。"""
+    url = f"{base_url.rstrip('/')}{VIDEO_REGENERATION_PATH}"
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": model, **payload},
+            timeout=request_timeout,
+        )
+    except requests.RequestException as error:
+        raise MiniMaxVideoError(f"MiniMax H3 创建再生成任务失败: {error}") from error
+
+    data = _response_json(response, "创建再生成任务")
+    _check_base_response(data, "创建再生成任务")
+    task_id = data.get("task_id") or (data.get("task") or {}).get("task_id")
+    if not task_id:
+        raise MiniMaxVideoError("MiniMax H3 创建再生成任务未返回 task_id")
+    return str(task_id)
+
+
 def query_video_task(
     *,
     api_key: str,
@@ -355,5 +445,65 @@ def generate_video(
         if remaining <= 0:
             raise MiniMaxVideoError(
                 f"等待 MiniMax H3 任务超时（task_id={task_id}, 最后状态={last_status}）"
+            )
+        sleep_fn(min(poll_interval, remaining))
+
+
+def regenerate_video(
+    *,
+    prompt: str,
+    base_video: str,
+    api_key: str,
+    base_url: str,
+    model: str = "MiniMax-H3",
+    resolution: str = REGENERATION_RESOLUTION,
+    output: str = "output/minimax_h3_2k.mp4",
+    timeout: int = 900,
+    poll_interval: int = 10,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> dict:
+    """将符合 H3 768P 规格的视频提交到官方 2K 再生成接口。"""
+    if timeout <= 0:
+        raise MiniMaxVideoError("timeout 必须大于 0 秒")
+    if poll_interval <= 0:
+        raise MiniMaxVideoError("poll-interval 必须大于 0 秒")
+
+    payload = build_regeneration_payload(
+        prompt=prompt,
+        base_video=base_video,
+        resolution=resolution,
+    )
+    task_id = create_regeneration_task(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        payload=payload,
+    )
+
+    deadline = time.monotonic() + timeout
+    last_status = ""
+    while True:
+        status, video_url = query_video_task(
+            api_key=api_key,
+            base_url=base_url,
+            task_id=task_id,
+        )
+        last_status = status
+        if video_url:
+            output_path = download_video(video_url, output)
+            return {
+                "task_id": task_id,
+                "status": status,
+                "video_url": video_url,
+                "output": output_path,
+                "model": model,
+                "resolution": payload["resolution"],
+                "task_type": "regeneration",
+            }
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MiniMaxVideoError(
+                f"等待 MiniMax H3 再生成任务超时（task_id={task_id}, 最后状态={last_status}）"
             )
         sleep_fn(min(poll_interval, remaining))

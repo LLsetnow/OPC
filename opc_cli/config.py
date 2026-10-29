@@ -42,7 +42,7 @@ def get_llm_config() -> tuple:
     """获取 DeepSeek LLM 配置，返回 (api_key, base_url, model)。"""
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
-    model = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
+    model = os.environ.get("LLM_MODEL", "deepseek-flash")
 
     if not api_key:
         print("错误: 未设置 DEEPSEEK_API_KEY 环境变量")

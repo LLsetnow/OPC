@@ -76,6 +76,7 @@ class CheckApiTests(unittest.TestCase):
         self.assertIn("deepseek", CHECK_MAP)
         self.assertIn("audio", CHECK_MAP)
         self.assertIn("qwen-tts", CHECK_MAP)
+        self.assertIn("wuying", CHECK_MAP)
 
     def test_check_api_does_not_run_deepseek_twice_for_compatibility_alias(self):
         from opc_cli.check_api import run_check_api
@@ -191,7 +192,7 @@ class CheckApiTests(unittest.TestCase):
 
         self.assertEqual(api_key, "deepseek-test-key")
         self.assertEqual(base_url, "https://api.deepseek.com")
-        self.assertEqual(model, "deepseek-v4-flash")
+        self.assertEqual(model, "deepseek-flash")
 
     def test_removed_function_keys_are_not_used_as_fallbacks(self):
         env = {

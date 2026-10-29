@@ -8,11 +8,38 @@ import sys
 from pathlib import Path
 
 from .config import get_llm_config, get_asr_config
+from .cookies import prepare_cookie_file
+from ._video import download_video as _download_video
 
 
-# ── Step 1: 下载 Bilibili 音频 ────────────────────────────────────
+# ── Bilibili 媒体下载 ─────────────────────────────────────────────
 
-def download_audio(url: str, output_dir: str, cookies: str = None, with_info: bool = False):
+def download_bilibili_video(
+    url: str,
+    output_dir: str,
+    cookies: str = None,
+    cookies_from_browser: str = None,
+    video_only: bool = False,
+) -> str:
+    """下载 B站 MP4；默认保留音轨，``video_only`` 时仅下载视频流。"""
+    return _download_video(
+        url,
+        output_dir,
+        cookies,
+        cookies_from_browser=cookies_from_browser,
+        video_only=video_only,
+        source_label="B站",
+        error_cls=RuntimeError,
+    )
+
+
+def download_audio(
+    url: str,
+    output_dir: str,
+    cookies: str = None,
+    with_info: bool = False,
+    cookies_from_browser: str = None,
+):
     """使用 yt-dlp 从 Bilibili 下载音频。
 
     默认只返回音频文件路径；需要将音频转换为 MP3 并写入元数据时，
@@ -23,6 +50,9 @@ def download_audio(url: str, output_dir: str, cookies: str = None, with_info: bo
     except (FileNotFoundError, subprocess.CalledProcessError):
         print("正在安装 yt-dlp...")
         subprocess.run([sys.executable, "-m", "pip", "install", "yt-dlp"], check=True)
+
+    cookies = cookies or os.environ.get("YT_DLP_COOKIES")
+    cookies = prepare_cookie_file(cookies, url, browser=cookies_from_browser)
 
     print(f"获取视频信息: {url}")
     info_cmd = ["yt-dlp", "--dump-json", "--no-playlist"]
@@ -852,7 +882,7 @@ def summarize_content(asr_result: dict, video_title: str, output_path: str, vide
             {"role": "user", "content": prompt},
         ],
         temperature=0.3,
-        max_tokens=4096,
+        max_tokens=16384,
     )
 
     summary = response.choices[0].message.content
@@ -893,6 +923,7 @@ def run_bili(
     llm_fix: bool = False,
     bitrate: int = 192,
     no_metadata: bool = False,
+    cookies_from_browser: str = None,
 ):
     """B站视频转写主流程，或在 ``audio_only`` 模式下导出 MP3。
 
@@ -923,9 +954,20 @@ def run_bili(
     else:
         cookies = cookies or os.environ.get("YT_DLP_COOKIES")
         if audio_only:
-            audio_path, info = download_audio(url, output_dir, cookies=cookies, with_info=True)
+            audio_path, info = download_audio(
+                url,
+                output_dir,
+                cookies=cookies,
+                with_info=True,
+                cookies_from_browser=cookies_from_browser,
+            )
         else:
-            audio_path = download_audio(url, output_dir, cookies=cookies)
+            audio_path = download_audio(
+                url,
+                output_dir,
+                cookies=cookies,
+                cookies_from_browser=cookies_from_browser,
+            )
 
     if audio_only:
         if skip_download:
