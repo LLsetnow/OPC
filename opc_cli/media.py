@@ -13,6 +13,7 @@ from .config import get_bili_folder, get_douyin_folder, get_x_folder, get_music_
 from .douyin import DouyinDownloadError, download_video as download_douyin_video
 from .music import run_music
 from .x import XDownloadError, download_video as download_x_video
+from .x_article import XArticleDownloadError, download_article as download_x_article
 
 SUPPORTED_PLATFORMS = ("bilibili", "douyin", "x", "netease")
 
@@ -63,6 +64,7 @@ def download_media(
     llm_fix: bool = False,
     cookies_from_browser: str = None,
     video_only: bool = False,
+    article: bool = False,
 ):
     """统一媒体下载入口，按 URL 平台分发。
 
@@ -86,6 +88,10 @@ def download_media(
         )
     if audio_only and video_only:
         raise MediaError("--audio-only 与 --video-only 不能同时使用")
+    if article and platform != "x":
+        raise MediaError("--article 仅适用于 X（x.com / twitter.com）链接")
+    if article and (summarize or audio_only or video_only):
+        raise MediaError("--article 不能与 --summarize / --audio-only / --video-only 同时使用")
     if summarize and (audio_only or video_only):
         raise MediaError("--summarize 不能与 --audio-only 或 --video-only 同时使用")
     if video_only and platform != "bilibili":
@@ -147,6 +153,11 @@ def download_media(
         out_dir = output_dir or get_douyin_folder() or "./output"
     else:
         out_dir = output_dir or get_x_folder() or "./output"
+    if platform == "x" and article:
+        try:
+            return download_x_article(url, out_dir)
+        except XArticleDownloadError as error:
+            raise MediaError(f"X 文章下载失败: {error}") from error
     if summarize:
         # run_bili 内部基于 yt-dlp，对抖音/X 同样可下载音频并完成 ASR + 总结
         return bili.run_bili(

@@ -80,7 +80,7 @@ opc news                        AI 日报：自动收集 AI 新闻并生成简�
 
 ## media download — 统一媒体下载/总结
 
-从 B站/抖音/X/网易云链接下载媒体，URL 自动识别平台。B站/抖音/X 可加 `--summarize` 走「下载音频 → ASR 转写 → 内容总结」流水线（多平台通用）；网易云下载为带 ID3 元数据的 MP3。
+从 B站/抖音/X/网易云链接下载媒体，URL 自动识别平台。B站/抖音/X 可加 `--summarize` 走「下载音频 → ASR 转写 → 内容总结」流水线（多平台通用）；X 长文可用 `--article` 保存为 Markdown 并下载图片；网易云下载为带 ID3 元数据的 MP3。
 
 ### 使用范例
 
@@ -131,6 +131,9 @@ opc media download "https://www.douyin.com/video/7644571768053571003" -o ./video
 # X (Twitter) 视频下载（通常需要 cookies）
 opc media download "https://x.com/i/status/2038177089082261736" --cookies ~/cookies.txt
 
+# X 长文导出为 Markdown，并把文章图片下载到相邻目录
+opc media download "https://x.com/author/article/1234567890" --article -o ./articles
+
 # 网易云音乐下载（单曲/专辑/歌单）
 opc media download "https://music.163.com/song?id=2143914149"
 
@@ -148,6 +151,7 @@ opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 
 | `--cookies-from-browser` | | `YT_DLP_COOKIES_FROM_BROWSER` | cookie 剩余寿命少于一半时用于续签的浏览器来源；支持 yt-dlp 的 browser specification |
 | `--audio-only` | | `false` | 仅下载音频并转为 MP3（仅 bilibili 生效） |
 | `--video-only` | | `false` | 仅下载无音轨的视频并输出 MP4（仅 bilibili 生效；不能与 `--audio-only` 或 `--summarize` 同用） |
+| `--article` | | `false` | 将公开 X 长文保存为 Markdown，并下载文章图片到相邻目录；仅适用于 X，使用 FxTwitter 公共接口，不发送 X cookies |
 | `--bitrate` | | `192` | MP3 比特率（`--audio-only` 或网易云时生效） |
 | `--no-metadata` | | `false` | 跳过 MP3 的 ID3 元数据写入 |
 | `--playlist` | | `false` | 下载全部曲目（网易云专辑/歌单/歌手链接默认已启用） |
@@ -169,8 +173,12 @@ opc media download "https://music.163.com/playlist?id=xxx" -o ./music --bitrate 
 | `{title}.srt` | SRT 字幕文件 |
 | `{title}.asr.json` | ASR 原始结果（JSON） |
 | `{title}.md` | Markdown 内容总结（含视频时间线链接） |
+| `{title}-{id}.md` | `--article` 导出的 X 长文（带来源元数据） |
+| `{title}-{id}_images/` | `--article` 下载的图片，Markdown 使用相对路径引用 |
 
 抖音的登录、年龄限制或反爬校验可能要求导出登录后的 cookies；X 大量视频对未登录用户不可见，报 "No video could be found" 时请用 `--cookies` 重试。请只下载有权保存或使用的视频。
+
+`--article` 通过第三方 FxTwitter 公共接口读取公开 X 长文，接口会收到帖子编号、用户名（如果链接中有）和请求 IP；OPC 不会把你的 X cookies 发送给该接口。受保护、年龄限制、已删除的文章可能无法读取。`x.com/i/article/<编号>` 链接不含作者信息，请改用作者的文章链接或分享文章的帖子链接。
 
 cookie 文件支持滑动续签：每次使用时读取 Netscape 格式中最早的持久 cookie 过期时间，首次使用以文件修改时间作为生命周期起点，之后用同目录下只含时间戳的 `.opc-renewal.json` sidecar 保留这个起点；剩余寿命少于该生命周期的一半时，若配置了 `YT_DLP_COOKIES_FROM_BROWSER` 或传入 `--cookies-from-browser`，OPC 会让 yt-dlp 从浏览器 profile 重新导出到临时文件，校验后原子替换旧文件。OPC 不会直接修改过期时间，也不会在没有浏览器来源时伪造续签；浏览器必须仍处于已登录状态。sidecar 不记录 cookie 值，且已加入忽略规则。只有 session cookie 的文件没有可判断的过期时间，因此不会触发该机制。
 

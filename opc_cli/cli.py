@@ -148,6 +148,11 @@ def media_download(
         "--video-only",
         help="仅下载无音轨的视频（仅 bilibili 生效）",
     ),
+    article: bool = typer.Option(
+        False,
+        "--article",
+        help="将 X 长文保存为 Markdown，并下载文章图片（使用 FxTwitter 公共接口；仅公开文章）",
+    ),
     bitrate: int = typer.Option(192, "--bitrate", help="MP3 比特率 (kbps，--audio-only 或网易云时生效)"),
     no_metadata: bool = typer.Option(False, "--no-metadata", help="跳过 MP3 的 ID3 元数据写入"),
     playlist: bool = typer.Option(False, "--playlist", help="下载全部曲目（网易云专辑/歌单/歌手链接默认已启用）"),
@@ -168,6 +173,7 @@ def media_download(
         opc media download "https://www.bilibili.com/video/BV1xx"  # B站 MP4（含音轨）
         opc media download "https://www.bilibili.com/video/BV1xx" --video-only  # 仅下载视频流
         opc media download "https://www.bilibili.com/video/BV1xx" --audio-only  # 仅下载音频并转 MP3
+        opc media download "https://x.com/author/article/123456" --article  # X 长文 Markdown + 图片
 
     B站完整流水线（下载 → ASR 转写 → 内容总结，多平台通用）:
 
@@ -176,6 +182,10 @@ def media_download(
     B站音频转 MP3（含 ID3 元数据）:
 
         opc media download "URL" --audio-only --bitrate 320
+
+    X 长文导出：
+
+        opc media download "https://x.com/author/article/123456" --article
     """
     load_env(env_file)
 
@@ -187,6 +197,7 @@ def media_download(
             cookies_from_browser=cookies_from_browser,
             audio_only=audio_only,
             video_only=video_only,
+            article=article,
             bitrate=bitrate,
             no_metadata=no_metadata,
             playlist=playlist,
